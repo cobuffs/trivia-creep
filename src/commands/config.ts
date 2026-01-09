@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, PermissionFlagsBits, TextChannel } from 'discord.js';
+import { ChatInputCommandInteraction, PermissionFlagsBits, TextChannel, MessageFlags } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { createSuccessEmbed, createErrorEmbed, createBotOverviewEmbed } from '../utils/formatters';
 import { logger } from '../utils/logger';
@@ -49,7 +49,8 @@ export async function handleConfigCommand(
       const textChannel = channel as TextChannel;
       if (textChannel && textChannel.isTextBased() && 'send' in textChannel) {
         await textChannel.send({
-          embeds: [createBotOverviewEmbed()]
+          embeds: [createBotOverviewEmbed()],
+          flags: MessageFlags.SuppressNotifications
         });
         logger.info(`Posted bot overview to channel ${channel.id} in guild ${interaction.guildId}`);
       }

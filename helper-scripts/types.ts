@@ -1,5 +1,6 @@
 // Flexible question interface for database
 export interface Question {
+  id?: number;                       // Optional: database ID (included when loaded from DB)
   source: string;                    // Required: source identifier
   question: string;                  // Required: the question text
   answer: string;                    // Required: the answer

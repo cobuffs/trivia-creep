@@ -7,6 +7,26 @@ export enum LogLevel {
   ERROR = 3
 }
 
+/**
+ * Parse log level from environment variable or string
+ */
+function getLogLevelFromEnv(): LogLevel {
+  const logLevel = process.env.LOG_LEVEL?.toUpperCase();
+  
+  switch (logLevel) {
+    case 'DEBUG':
+      return LogLevel.DEBUG;
+    case 'INFO':
+      return LogLevel.INFO;
+    case 'WARN':
+      return LogLevel.WARN;
+    case 'ERROR':
+      return LogLevel.ERROR;
+    default:
+      return LogLevel.INFO; // Default to INFO if not set or invalid
+  }
+}
+
 class Logger {
   private level: LogLevel;
 
@@ -39,4 +59,4 @@ class Logger {
   }
 }
 
-export const logger = new Logger(LogLevel.INFO);
+export const logger = new Logger(getLogLevelFromEnv());

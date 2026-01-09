@@ -194,6 +194,7 @@ export class DatabaseService {
         `);
 
       return result.recordset.map((row: any) => ({
+        id: row.id,
         source: row.source,
         question: row.question,
         answer: row.answer,
@@ -234,6 +235,7 @@ export class DatabaseService {
 
       const row = result.recordset[0];
       return {
+        id: row.id,
         source: row.source,
         question: row.question,
         answer: row.answer,

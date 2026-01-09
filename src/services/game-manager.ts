@@ -160,8 +160,19 @@ export class GameManager {
       this.gameState.questions.round2 = round2Questions;
       this.gameState.questions.final = finalQuestions[0];
 
+      // Debug: Log question IDs when questions are loaded
+      const round1Ids = round1Questions.map(q => q.id).filter((id): id is number => id !== undefined);
+      const round2Ids = round2Questions.map(q => q.id).filter((id): id is number => id !== undefined);
+      const finalId = finalQuestions[0]?.id;
+      logger.debug(`[GAME START DEBUG] Round 1 Question IDs loaded: ${JSON.stringify(round1Ids)}`);
+      logger.debug(`[GAME START DEBUG] Round 2 Question IDs loaded: ${JSON.stringify(round2Ids)}`);
+      logger.debug(`[GAME START DEBUG] Final Question ID loaded: ${finalId}`);
+
       // Post game rules
-      await channel.send({ embeds: [createRulesEmbed()] });
+      await channel.send({ 
+        embeds: [createRulesEmbed()],
+        flags: MessageFlags.SuppressNotifications
+      });
 
       // Start Round 1
       this.gameState.status = 'ROUND_1';
@@ -509,12 +520,20 @@ export class GameManager {
     this.gameState.status = 'ARCHIVING';
 
     try {
-      const round1QuestionIds = this.gameState.questions.round1.map((q, idx) => {
-        // We need to get question IDs from database - for now, we'll store indices
-        // In a real implementation, we'd need to track question IDs
-        return idx;
-      });
-      const round2QuestionIds = this.gameState.questions.round2.map((q, idx) => idx);
+      const round1QuestionIds = this.gameState.questions.round1
+        .map(q => q.id)
+        .filter((id): id is number => id !== undefined);
+      const round2QuestionIds = this.gameState.questions.round2
+        .map(q => q.id)
+        .filter((id): id is number => id !== undefined);
+      const finalQuestionId = this.gameState.questions.final?.id ?? null;
+
+      // Debug: Log question IDs to verify they're being captured correctly
+      logger.debug(`[ARCHIVE DEBUG] Round 1 Question IDs: ${JSON.stringify(round1QuestionIds)}`);
+      logger.debug(`[ARCHIVE DEBUG] Round 2 Question IDs: ${JSON.stringify(round2QuestionIds)}`);
+      logger.debug(`[ARCHIVE DEBUG] Final Question ID: ${finalQuestionId}`);
+      logger.debug(`[ARCHIVE DEBUG] Round 1 questions count: ${this.gameState.questions.round1.length}, IDs extracted: ${round1QuestionIds.length}`);
+      logger.debug(`[ARCHIVE DEBUG] Round 2 questions count: ${this.gameState.questions.round2.length}, IDs extracted: ${round2QuestionIds.length}`);
 
       const players = Array.from(this.gameState.players.values()).map(player => ({
         userId: player.userId,
@@ -527,19 +546,24 @@ export class GameManager {
         finalScoreChange: player.finalScoreChange ?? null
       }));
 
-      await this.databaseService.archiveGame(
-        this.gameState.guildId,
-        this.gameState.channelId,
-        this.gameState.startTime,
-        new Date(),
-        'completed',
-        round1QuestionIds,
-        round2QuestionIds,
-        null, // finalQuestionId - would need to track this
-        players
-      );
+      // Only archive if more than 1 player participated (prevent gaming the system)
+      if (players.length > 1) {
+        await this.databaseService.archiveGame(
+          this.gameState.guildId,
+          this.gameState.channelId,
+          this.gameState.startTime,
+          new Date(),
+          'completed',
+          round1QuestionIds,
+          round2QuestionIds,
+          finalQuestionId,
+          players
+        );
 
-      logger.info(`Game ${this.gameState.gameId} archived successfully`);
+        logger.info(`Game ${this.gameState.gameId} archived successfully`);
+      } else {
+        logger.info(`Game ${this.gameState.gameId} not archived - only 1 player participated`);
+      }
     } catch (error) {
       logger.error('Error archiving game:', error);
     } finally {
@@ -595,8 +619,20 @@ export class GameManager {
     // Archive with 'abandoned' status
     this.gameState.status = 'ARCHIVING';
     try {
-      const round1QuestionIds = this.gameState.questions.round1.map((q, idx) => idx);
-      const round2QuestionIds = this.gameState.questions.round2.map((q, idx) => idx);
+      const round1QuestionIds = this.gameState.questions.round1
+        .map(q => q.id)
+        .filter((id): id is number => id !== undefined);
+      const round2QuestionIds = this.gameState.questions.round2
+        .map(q => q.id)
+        .filter((id): id is number => id !== undefined);
+      const finalQuestionId = this.gameState.questions.final?.id ?? null;
+
+      // Debug: Log question IDs to verify they're being captured correctly
+      logger.debug(`[ARCHIVE DEBUG] Round 1 Question IDs: ${JSON.stringify(round1QuestionIds)}`);
+      logger.debug(`[ARCHIVE DEBUG] Round 2 Question IDs: ${JSON.stringify(round2QuestionIds)}`);
+      logger.debug(`[ARCHIVE DEBUG] Final Question ID: ${finalQuestionId}`);
+      logger.debug(`[ARCHIVE DEBUG] Round 1 questions count: ${this.gameState.questions.round1.length}, IDs extracted: ${round1QuestionIds.length}`);
+      logger.debug(`[ARCHIVE DEBUG] Round 2 questions count: ${this.gameState.questions.round2.length}, IDs extracted: ${round2QuestionIds.length}`);
 
       const players = Array.from(this.gameState.players.values()).map(player => ({
         userId: player.userId,
@@ -609,17 +645,22 @@ export class GameManager {
         finalScoreChange: player.finalScoreChange ?? null
       }));
 
-      await this.databaseService.archiveGame(
-        this.gameState.guildId,
-        this.gameState.channelId,
-        this.gameState.startTime,
-        new Date(),
-        'abandoned',
-        round1QuestionIds,
-        round2QuestionIds,
-        null,
-        players
-      );
+      // Only archive if more than 1 player participated (prevent gaming the system)
+      if (players.length > 1) {
+        await this.databaseService.archiveGame(
+          this.gameState.guildId,
+          this.gameState.channelId,
+          this.gameState.startTime,
+          new Date(),
+          'abandoned',
+          round1QuestionIds,
+          round2QuestionIds,
+          finalQuestionId,
+          players
+        );
+      } else {
+        logger.info(`Game ${this.gameState.gameId} not archived - only 1 player participated`);
+      }
     } catch (error) {
       logger.error('Error archiving abandoned game:', error);
     } finally {
