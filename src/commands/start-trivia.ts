@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction } from 'discord.js';
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed } from '../utils/formatters';
@@ -68,7 +68,8 @@ export async function handleStartTriviaCommand(
       embeds: [createSuccessEmbed(
         'Game Started',
         `🎮 Starting new trivia game!\nRules posted in ${channel}`
-      )]
+      )],
+      flags: MessageFlags.SuppressNotifications
     });
 
     logger.info(`Game started by ${interaction.user.tag} in guild ${interaction.guildId}`);

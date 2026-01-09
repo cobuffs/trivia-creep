@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, PermissionFlagsBits } from 'discord.js';
+import { ChatInputCommandInteraction, PermissionFlagsBits, MessageFlags } from 'discord.js';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed } from '../utils/formatters';
 import { logger } from '../utils/logger';
@@ -39,7 +39,8 @@ export async function handleEndTriviaCommand(
       embeds: [createSuccessEmbed(
         'Game Ended',
         `🛑 Trivia game ended early by @${interaction.user.username}\n\nFinal leaderboard posted in channel.\n\nGame has been archived.`
-      )]
+      )],
+      flags: MessageFlags.SuppressNotifications
     });
 
     logger.info(`Game ended early by ${interaction.user.tag} in guild ${interaction.guildId}`);

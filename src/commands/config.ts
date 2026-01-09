@@ -39,7 +39,8 @@ export async function handleConfigCommand(
       embeds: [createSuccessEmbed(
         'Trivia Channel Configured',
         `Trivia channel configured: ${channel}\nAll trivia games will be played in this channel.`
-      )]
+      )],
+      flags: MessageFlags.SuppressNotifications
     });
 
     logger.info(`Guild ${interaction.guildId} configured trivia channel: ${channel.id}`);
