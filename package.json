@@ -7,6 +7,7 @@
     "build": "tsc",
     "start": "node dist/bot/index.js",
     "dev": "ts-node src/bot/index.ts",
+    "setup:database": "ts-node helper-scripts/create-bot-tables.ts",
     "scrape:jarchive": "ts-node helper-scripts/j-archive-scraper.ts",
     "scrape:jarchive:season": "ts-node helper-scripts/j-archive-scraper.ts --season",
     "scrape:jarchive:game": "ts-node helper-scripts/j-archive-scraper.ts --game-id"
