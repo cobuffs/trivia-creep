@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { ChatInputCommandInteraction, TextChannel, MessageFlags } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed } from '../utils/formatters';
@@ -9,17 +9,16 @@ export async function handleStartTriviaCommand(
   databaseService: DatabaseService,
   gameManager: GameManager
 ) {
-  await interaction.deferReply();
-
   try {
     // Check if channel is configured
     const config = await databaseService.getGuildConfig(interaction.guildId!);
     if (!config || !config.triviaChannelId) {
-      await interaction.editReply({
+      await interaction.reply({
         embeds: [createErrorEmbed(
           'Trivia Channel Not Configured',
           'Trivia channel not configured. Use `/config` to set it up.'
-        )]
+        )],
+        ephemeral: true
       });
       return;
     }
@@ -28,11 +27,12 @@ export async function handleStartTriviaCommand(
     if (gameManager.isGameActive()) {
       const gameState = gameManager.getGameStateForGuild(interaction.guildId!);
       if (gameState) {
-        await interaction.editReply({
+        await interaction.reply({
           embeds: [createErrorEmbed(
             'Game Already in Progress',
             'A trivia game is already in progress. Please wait for it to finish.'
-          )]
+          )],
+          ephemeral: true
         });
         return;
       }
@@ -41,36 +41,39 @@ export async function handleStartTriviaCommand(
     // Get the trivia channel
     const channel = await interaction.guild?.channels.fetch(config.triviaChannelId);
     if (!channel || channel.type !== 0) { // 0 = GUILD_TEXT
-      await interaction.editReply({
+      await interaction.reply({
         embeds: [createErrorEmbed(
           'Channel Not Found',
           'The configured trivia channel could not be found.'
-        )]
+        )],
+        ephemeral: true
       });
       return;
     }
 
     // Check bot permissions
     if (!channel.permissionsFor(interaction.client.user!)?.has(['SendMessages', 'EmbedLinks'])) {
-      await interaction.editReply({
+      await interaction.reply({
         embeds: [createErrorEmbed(
           'Insufficient Permissions',
           'Bot lacks permissions to post messages in the configured channel.'
-        )]
+        )],
+        ephemeral: true
       });
       return;
     }
 
-    // Start the game
-    await gameManager.startGame(interaction.guildId!, config.triviaChannelId, channel);
-
-    await interaction.editReply({
+    // Reply with success message to user (ephemeral, only they see it)
+    await interaction.reply({
       embeds: [createSuccessEmbed(
         'Game Started',
-        `🎮 Starting new trivia game!\nRules posted in ${channel}`
+        'Trivia game is starting! Rules posted in the trivia channel.'
       )],
-      flags: MessageFlags.SuppressNotifications
+      ephemeral: true
     });
+
+    // Start the game (this will post rules and wait 30 seconds before first question)
+    await gameManager.startGame(interaction.guildId!, config.triviaChannelId, channel);
 
     logger.info(`Game started by ${interaction.user.tag} in guild ${interaction.guildId}`);
   } catch (error: any) {
@@ -83,8 +86,12 @@ export async function handleStartTriviaCommand(
       errorMessage = 'Not enough questions available. Please ensure questions are scraped.';
     }
 
-    await interaction.editReply({
-      embeds: [createErrorEmbed('Failed to Start Game', errorMessage)]
-    });
+    // Only show error if we haven't already replied
+    if (!interaction.replied) {
+      await interaction.reply({
+        embeds: [createErrorEmbed('Failed to Start Game', errorMessage)],
+        ephemeral: true
+      });
+    }
   }
 }

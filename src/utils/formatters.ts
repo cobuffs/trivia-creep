@@ -48,7 +48,7 @@ export function createRulesEmbed(): EmbedBuilder {
       '• 5 second break between questions\n' +
       '• 30 second break between rounds\n' +
       '• Final Jeopardy: Wager first, then answer\n\n' +
-      'Let\'s begin!'
+      'We\'ll begin in 30 seconds!'
     )
     .setColor(0x0099FF)
     .setTimestamp();

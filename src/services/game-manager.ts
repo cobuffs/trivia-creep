@@ -174,6 +174,9 @@ export class GameManager {
         flags: MessageFlags.SuppressNotifications
       });
 
+      // Wait 30 seconds before starting
+      await new Promise(resolve => setTimeout(resolve, 30000));
+
       // Start Round 1
       this.gameState.status = 'ROUND_1';
       await this.startQuestion(0, 'round1');

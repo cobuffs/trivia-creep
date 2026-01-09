@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, PermissionFlagsBits, MessageFlags } from 'discord.js';
+import { ChatInputCommandInteraction, PermissionFlagsBits, MessageFlags, TextChannel } from 'discord.js';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed } from '../utils/formatters';
 import { logger } from '../utils/logger';
@@ -35,13 +35,25 @@ export async function handleEndTriviaCommand(
   try {
     await gameManager.endGameEarly();
 
+    // Send ephemeral reply to user
     await interaction.reply({
       embeds: [createSuccessEmbed(
         'Game Ended',
         `🛑 Trivia game ended early by @${interaction.user.username}\n\nFinal leaderboard posted in channel.\n\nGame has been archived.`
       )],
-      flags: MessageFlags.SuppressNotifications
+      ephemeral: true
     });
+
+    // Also send a message to the trivia channel (with suppressed notifications)
+    if (gameState.channel && gameState.channel.isTextBased() && 'send' in gameState.channel) {
+      await (gameState.channel as TextChannel).send({
+        embeds: [createSuccessEmbed(
+          'Game Ended',
+          `🛑 Trivia game ended early by @${interaction.user.username}\n\nFinal leaderboard posted above.\n\nGame has been archived.`
+        )],
+        flags: MessageFlags.SuppressNotifications
+      });
+    }
 
     logger.info(`Game ended early by ${interaction.user.tag} in guild ${interaction.guildId}`);
   } catch (error) {

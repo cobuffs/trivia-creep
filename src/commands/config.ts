@@ -40,7 +40,7 @@ export async function handleConfigCommand(
         'Trivia Channel Configured',
         `Trivia channel configured: ${channel}\nAll trivia games will be played in this channel.`
       )],
-      flags: MessageFlags.SuppressNotifications
+      ephemeral: true
     });
 
     logger.info(`Guild ${interaction.guildId} configured trivia channel: ${channel.id}`);
