@@ -43,6 +43,7 @@ export function createRulesEmbed(): EmbedBuilder {
       '**Rules:**\n' +
       '• 20 questions + 1 Final Jeopardy\n' +
       '• Answer in chat (no need to phrase as question)\n' +
+      '• All messages sent during questions will be treated as answer attempts (but since there is no penalty for incorrect answers, go crazy!)\n' +
       '• First correct answer wins the points\n' +
       '• 30 seconds per question\n' +
       '• 5 second break between questions\n' +

@@ -85,6 +85,7 @@ interface PlayerState {
    Rules:
    • 20 questions + 1 Final Jeopardy
    • Answer in chat (no need to phrase as question)
+   • All messages sent during questions will be treated as answer attempts
    • First correct answer wins the points
    • 30 seconds per question
    • Final Jeopardy: Wager first, then answer
