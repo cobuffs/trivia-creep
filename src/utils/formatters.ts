@@ -338,3 +338,44 @@ export function createPlayerHistoryEmbed(
     .setColor(0x3498DB)
     .setTimestamp();
 }
+
+/**
+ * Create embed for bot overview and commands
+ */
+export function createBotOverviewEmbed(): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle('🎮 Welcome to Trivia Creep!')
+    .setDescription(
+      'A Discord trivia bot featuring Jeopardy-style questions from j-archive.com.\n\n' +
+      '**How it works:**\n' +
+      '• Play Jeopardy-style trivia games with 20 questions + Final Jeopardy\n' +
+      '• Answer questions in chat (do not phrase as a question)\n' +
+      '• First correct answer wins the points\n' +
+      '• Track your scores and compete on leaderboards\n\n' +
+      '**Game Format:**\n' +
+      '• Round 1: 10 Jeopardy! questions\n' +
+      '• Round 2: 10 Double Jeopardy! questions\n' +
+      '• Final Jeopardy: 1 final question with wagering\n\n' +
+      '**Timing:**\n' +
+      '• 30 seconds per question\n' +
+      '• 5 second break between questions\n' +
+      '• 30 second break between rounds'
+    )
+    .addFields(
+      {
+        name: '📋 Commands',
+        value:
+          '**`/start-trivia`** - Start a new trivia game\n' +
+          '**`/end-trivia`** - End the current game early (Admin only)\n' +
+          '**`/leaderboard`** - View leaderboard statistics\n' +
+          '**`/my-trivia-history`** - View your personal statistics\n' +
+          '**`/final-wager`** - Place a wager for Final Jeopardy\n' +
+          '**`/final-guess`** - Submit your Final Jeopardy answer\n' +
+          '**`/config`** - Configure trivia channel (Admin only)',
+        inline: false
+      }
+    )
+    .setFooter({ text: 'Ready to play? Use /start-trivia to begin!' })
+    .setColor(0x0099FF)
+    .setTimestamp();
+}

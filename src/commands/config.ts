@@ -1,6 +1,6 @@
-import { ChatInputCommandInteraction, PermissionFlagsBits } from 'discord.js';
+import { ChatInputCommandInteraction, PermissionFlagsBits, TextChannel } from 'discord.js';
 import { DatabaseService } from '../services/database';
-import { createSuccessEmbed, createErrorEmbed } from '../utils/formatters';
+import { createSuccessEmbed, createErrorEmbed, createBotOverviewEmbed } from '../utils/formatters';
 import { logger } from '../utils/logger';
 
 export async function handleConfigCommand(
@@ -43,6 +43,20 @@ export async function handleConfigCommand(
     });
 
     logger.info(`Guild ${interaction.guildId} configured trivia channel: ${channel.id}`);
+
+    // Post bot overview to the configured channel
+    try {
+      const textChannel = channel as TextChannel;
+      if (textChannel && textChannel.isTextBased() && 'send' in textChannel) {
+        await textChannel.send({
+          embeds: [createBotOverviewEmbed()]
+        });
+        logger.info(`Posted bot overview to channel ${channel.id} in guild ${interaction.guildId}`);
+      }
+    } catch (overviewError) {
+      logger.error('Error posting bot overview to channel:', overviewError);
+      // Don't fail the config command if overview posting fails
+    }
   } catch (error) {
     logger.error('Error setting guild config:', error);
     await interaction.reply({
