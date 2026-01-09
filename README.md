@@ -60,6 +60,7 @@ Before running the bot, you need to create and configure a Discord application:
      - ✅ Embed Links
      - ✅ Read Message History
      - ✅ Use Slash Commands
+     - ✅ View Roles (recommended for role-based access control)
    - Copy the generated URL at the bottom
    - Open the URL in your browser to invite the bot to your server
    - Make sure you have "Manage Server" permissions on the server
@@ -128,14 +129,16 @@ npm start
 Once the bot is running and invited to your server:
 
 #### `/config` (Admin Only)
-Configure the trivia channel for your server.
+Configure the trivia channel and optional role requirement for your server.
 
 - **Options:**
   - `channel` (required) - The Discord channel to use for trivia games
+  - `required-role` (optional) - Role required to start trivia games. If not set, anyone can start games.
 
-**Example:**
+**Examples:**
 ```
 /config channel:#trivia
+/config channel:#trivia required-role:@Trivia Master
 ```
 
 #### `/start-trivia`

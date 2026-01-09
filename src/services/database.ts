@@ -53,6 +53,7 @@ function getConnection(): sql.ConnectionPool {
 export interface GuildConfig {
   guildId: string;
   triviaChannelId: string | null;
+  requiredRoleId: string | null;
   updatedAt: Date;
 }
 
@@ -124,7 +125,7 @@ export class DatabaseService {
         .request()
         .input('guild_id', sql.NVarChar, guildId)
         .query(`
-          SELECT [guild_id], [trivia_channel_id], [updated_at]
+          SELECT [guild_id], [trivia_channel_id], [required_role_id], [updated_at]
           FROM [dbo].[guild_config]
           WHERE [guild_id] = @guild_id
         `);
@@ -137,6 +138,7 @@ export class DatabaseService {
       return {
         guildId: row.guild_id,
         triviaChannelId: row.trivia_channel_id,
+        requiredRoleId: row.required_role_id,
         updatedAt: row.updated_at
       };
     } catch (error) {
@@ -148,22 +150,30 @@ export class DatabaseService {
   /**
    * Set guild configuration
    */
-  async setGuildConfig(guildId: string, triviaChannelId: string | null): Promise<void> {
+  async setGuildConfig(
+    guildId: string, 
+    triviaChannelId: string | null, 
+    requiredRoleId: string | null = null
+  ): Promise<void> {
     const pool = getConnection();
     try {
       await pool
         .request()
         .input('guild_id', sql.NVarChar, guildId)
         .input('trivia_channel_id', sql.NVarChar, triviaChannelId)
+        .input('required_role_id', sql.NVarChar, requiredRoleId)
         .query(`
           MERGE [dbo].[guild_config] AS target
           USING (SELECT @guild_id AS [guild_id]) AS source
           ON target.[guild_id] = source.[guild_id]
           WHEN MATCHED THEN
-            UPDATE SET [trivia_channel_id] = @trivia_channel_id, [updated_at] = GETDATE()
+            UPDATE SET 
+              [trivia_channel_id] = @trivia_channel_id, 
+              [required_role_id] = @required_role_id,
+              [updated_at] = GETDATE()
           WHEN NOT MATCHED THEN
-            INSERT ([guild_id], [trivia_channel_id], [updated_at])
-            VALUES (@guild_id, @trivia_channel_id, GETDATE());
+            INSERT ([guild_id], [trivia_channel_id], [required_role_id], [updated_at])
+            VALUES (@guild_id, @trivia_channel_id, @required_role_id, GETDATE());
         `);
     } catch (error) {
       console.error('Error setting guild config:', error);

@@ -78,10 +78,22 @@ async function createBotTables(): Promise<void> {
           [config_id] INT IDENTITY(1,1) PRIMARY KEY,
           [guild_id] NVARCHAR(255) NOT NULL UNIQUE,
           [trivia_channel_id] NVARCHAR(255) NULL,
+          [required_role_id] NVARCHAR(255) NULL,
           [updated_at] DATETIME2 NOT NULL DEFAULT GETDATE()
         );
         
         CREATE INDEX IX_guild_config_guild_id ON [dbo].[guild_config]([guild_id]);
+      END
+    `;
+
+    // Add required_role_id column if table exists but column doesn't
+    const addRequiredRoleColumn = `
+      IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[guild_config]') AND type in (N'U'))
+      BEGIN
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[guild_config]') AND name = 'required_role_id')
+        BEGIN
+          ALTER TABLE [dbo].[guild_config] ADD [required_role_id] NVARCHAR(255) NULL;
+        END
       END
     `;
 
@@ -97,6 +109,9 @@ async function createBotTables(): Promise<void> {
     
     await pool.request().query(createGuildConfigTable);
     console.log('✓ guild_config table created');
+    
+    await pool.request().query(addRequiredRoleColumn);
+    console.log('✓ required_role_id column added (if needed)');
     
     console.log('\nAll bot tables created successfully!');
   } catch (error) {

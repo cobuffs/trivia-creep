@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, TextChannel, MessageFlags } from 'discord.js';
+import { ChatInputCommandInteraction, TextChannel, MessageFlags, GuildMember } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed } from '../utils/formatters';
@@ -21,6 +21,44 @@ export async function handleStartTriviaCommand(
         ephemeral: true
       });
       return;
+    }
+
+    // Check if user has required role (if configured)
+    if (config.requiredRoleId) {
+      let member: GuildMember | null = null;
+      
+      // Get member from interaction or fetch it
+      if (interaction.member instanceof GuildMember) {
+        member = interaction.member;
+      } else if (interaction.member && 'roles' in interaction.member) {
+        // APIInteractionGuildMember - fetch the full GuildMember
+        member = await interaction.guild?.members.fetch(interaction.user.id) || null;
+      } else if (!interaction.member) {
+        // Member not available, fetch it
+        member = await interaction.guild?.members.fetch(interaction.user.id) || null;
+      }
+      
+      // Check if member has the required role
+      if (!member || !member.roles.cache.has(config.requiredRoleId)) {
+        let roleName = 'required';
+        try {
+          const role = await interaction.guild?.roles.fetch(config.requiredRoleId);
+          if (role) {
+            roleName = role.name;
+          }
+        } catch (error) {
+          logger.warn(`Could not fetch role ${config.requiredRoleId} for permission check:`, error);
+        }
+        
+        await interaction.reply({
+          embeds: [createErrorEmbed(
+            'Permission Denied',
+            `You need the ${roleName} role to start trivia games.`
+          )],
+          ephemeral: true
+        });
+        return;
+      }
     }
 
     // Check if game is already active

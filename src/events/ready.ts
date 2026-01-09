@@ -12,6 +12,12 @@ const commands = [
         .setDescription('The Discord channel to use for trivia games')
         .setRequired(true)
     )
+    .addRoleOption(option =>
+      option
+        .setName('required-role')
+        .setDescription('Role required to start trivia games (optional, leave empty to allow anyone)')
+        .setRequired(false)
+    )
     .toJSON(),
 
   new SlashCommandBuilder()

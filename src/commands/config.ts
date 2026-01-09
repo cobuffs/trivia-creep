@@ -20,6 +20,7 @@ export async function handleConfigCommand(
   }
 
   const channel = interaction.options.getChannel('channel', true);
+  const requiredRole = interaction.options.getRole('required-role');
 
   if (!channel || channel.type !== 0) { // 0 = GUILD_TEXT
     await interaction.reply({
@@ -32,13 +33,49 @@ export async function handleConfigCommand(
     return;
   }
 
-  try {
-    await databaseService.setGuildConfig(interaction.guildId!, channel.id);
+  // Verify the role exists and bot can see it (if a role was provided)
+  if (requiredRole) {
+    try {
+      // Verify the role exists in the guild
+      const role = await interaction.guild!.roles.fetch(requiredRole.id);
+      if (!role) {
+        await interaction.reply({
+          embeds: [createErrorEmbed(
+            'Invalid Role',
+            'The specified role could not be found.'
+          )],
+          ephemeral: true
+        });
+        return;
+      }
+    } catch (error) {
+      logger.warn(`Could not fetch role ${requiredRole.id} during config:`, error);
+      await interaction.reply({
+        embeds: [createErrorEmbed(
+          'Invalid Role',
+          'Unable to verify the specified role. The bot may need "View Roles" permission to use role-based access control.'
+        )],
+        ephemeral: true
+      });
+      return;
+    }
+  }
 
+  try {
+    await databaseService.setGuildConfig(
+      interaction.guildId!, 
+      channel.id, 
+      requiredRole?.id || null
+    );
+
+    const roleMessage = requiredRole 
+      ? `\nRequired role to start trivia: ${requiredRole}`
+      : '\nAnyone can start trivia games.';
+    
     await interaction.reply({
       embeds: [createSuccessEmbed(
         'Trivia Channel Configured',
-        `Trivia channel configured: ${channel}\nAll trivia games will be played in this channel.`
+        `Trivia channel configured: ${channel}${roleMessage}\nAll trivia games will be played in this channel.`
       )],
       ephemeral: true
     });
