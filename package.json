@@ -10,7 +10,8 @@
     "setup:database": "ts-node helper-scripts/create-bot-tables.ts",
     "scrape:jarchive": "ts-node helper-scripts/j-archive-scraper.ts",
     "scrape:jarchive:season": "ts-node helper-scripts/j-archive-scraper.ts --season",
-    "scrape:jarchive:game": "ts-node helper-scripts/j-archive-scraper.ts --game-id"
+    "scrape:jarchive:game": "ts-node helper-scripts/j-archive-scraper.ts --game-id",
+    "normalize:answers": "ts-node helper-scripts/normalize-answers.ts"
   },
   "keywords": [
     "discord",
@@ -26,6 +27,7 @@
     "discord.js": "^14.14.0",
     "dotenv": "^16.3.1",
     "mssql": "^10.0.1",
+    "p-limit": "^5.0.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
