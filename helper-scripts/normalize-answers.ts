@@ -43,11 +43,14 @@ const CONFIG = {
   CONCURRENCY: Number(process.env.CONCURRENCY ?? "50"), // Increased to 50 for maximum throughput
   DB_WRITE_BATCH_SIZE: Number(process.env.DB_WRITE_BATCH_SIZE ?? "50"), // Batch database writes
   API_TIMEOUT_MS: Number(process.env.API_TIMEOUT_MS ?? "60000"), // 60 second timeout
+  MAX_TOKENS: Number(process.env.MAX_TOKENS ?? "2048"), // Maximum response tokens (JSON responses should be much smaller)
   START_AFTER_ID: Number(process.env.START_AFTER_ID ?? "0"),
   MAX_QUESTIONS: process.env.MAX_QUESTIONS ? Number(process.env.MAX_QUESTIONS) : undefined,
   DRY_RUN: (process.env.DRY_RUN ?? "false").toLowerCase() === "true",
 };
 
+// NOTE: System prompt should be configured on LM Studio server side for better performance
+// This constant is kept for reference/documentation only - not sent in API calls
 const SYSTEM_PROMPT = `You are an offline data-enrichment engine for a Jeopardy-style trivia database.
 
 Input fields:
@@ -173,18 +176,85 @@ function normalizeText(input: string): string {
   return s;
 }
 
+function repairJson(jsonText: string): string {
+  // Fix common JSON errors from LLM outputs
+  let repaired = jsonText;
+  
+  // Fix missing values after colons (e.g., "required_count": ,)
+  repaired = repaired.replace(/:\s*,/g, ': null,');
+  repaired = repaired.replace(/:\s*}/g, ': null}');
+  repaired = repaired.replace(/:\s*]/g, ': null]');
+  
+  // Fix trailing commas
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+  
+  // Fix unquoted keys (shouldn't happen with schema, but just in case)
+  repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+  
+  return repaired;
+}
+
 function extractFirstJsonObject(s: string): any {
-  const start = s.indexOf("{");
+  // Strip markdown code blocks if present
+  let cleaned = s.trim();
+  
+  // Remove ```json and ``` markers
+  if (cleaned.startsWith('```')) {
+    const lines = cleaned.split('\n');
+    // Remove first line if it's ```json or ```
+    if (lines[0].match(/^```(json)?$/i)) {
+      lines.shift();
+    }
+    // Remove last line if it's ```
+    if (lines.length > 0 && lines[lines.length - 1].trim() === '```') {
+      lines.pop();
+    }
+    cleaned = lines.join('\n').trim();
+  }
+  
+  const start = cleaned.indexOf("{");
   if (start === -1) throw new Error("No JSON object start found");
+  
   let depth = 0;
-  for (let i = start; i < s.length; i++) {
-    const ch = s[i];
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+    
+    if (ch === '\\') {
+      escapeNext = true;
+      continue;
+    }
+    
+    if (ch === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+    
+    if (inString) continue;
+    
     if (ch === "{") depth++;
     else if (ch === "}") {
       depth--;
       if (depth === 0) {
-        const jsonText = s.slice(start, i + 1);
-        return JSON.parse(jsonText);
+        const jsonText = cleaned.slice(start, i + 1);
+        try {
+          return JSON.parse(jsonText);
+        } catch (e) {
+          // Try to repair and parse again
+          try {
+            const repaired = repairJson(jsonText);
+            return JSON.parse(repaired);
+          } catch (e2) {
+            throw new Error(`Invalid JSON: ${e2 instanceof Error ? e2.message : String(e2)}. Original: ${jsonText.substring(0, 200)}`);
+          }
+        }
       }
     }
   }
@@ -308,10 +378,13 @@ async function callLMStudioOnce(userContent: string, useSchema: boolean, signal?
   const body: any = {
     model: CONFIG.LM_MODEL,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      // System prompt is configured on LM Studio server side - not sent here for performance
       { role: "user", content: userContent },
     ],
-    temperature: 0,
+    temperature: 0.1,
+    seed: 42, // Fixed seed for deterministic outputs (even with temp 0, seed ensures reproducibility)
+    top_p: 1.0, // Disable nucleus sampling for determinism
+    max_tokens: CONFIG.MAX_TOKENS, // Limit response length
   };
   if (useSchema) body.response_format = RESPONSE_FORMAT;
 

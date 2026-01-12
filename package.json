@@ -11,7 +11,8 @@
     "scrape:jarchive": "ts-node helper-scripts/j-archive-scraper.ts",
     "scrape:jarchive:season": "ts-node helper-scripts/j-archive-scraper.ts --season",
     "scrape:jarchive:game": "ts-node helper-scripts/j-archive-scraper.ts --game-id",
-    "normalize:answers": "ts-node helper-scripts/normalize-answers.ts"
+    "normalize:answers": "ts-node helper-scripts/normalize-answers.ts",
+    "curl:question": "ts-node helper-scripts/generate-curl.ts"
   },
   "keywords": [
     "discord",
