@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, TextChannel, MessageFlags, GuildMember } from 'discord.js';
+import { ChatInputCommandInteraction, TextChannel, MessageFlags, GuildMember, PermissionFlagsBits } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed } from '../utils/formatters';
@@ -90,11 +90,18 @@ export async function handleStartTriviaCommand(
     }
 
     // Check bot permissions
-    if (!channel.permissionsFor(interaction.client.user!)?.has(['SendMessages', 'EmbedLinks'])) {
+    const requiredPermissions = [
+      PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.EmbedLinks,
+      PermissionFlagsBits.CreatePublicThreads,
+      PermissionFlagsBits.SendMessagesInThreads,
+      PermissionFlagsBits.ManageThreads
+    ];
+    if (!channel.permissionsFor(interaction.client.user!)?.has(requiredPermissions)) {
       await interaction.reply({
         embeds: [createErrorEmbed(
           'Insufficient Permissions',
-          'Bot lacks permissions to post messages in the configured channel.'
+          'Bot lacks required permissions. Please ensure the bot has: Send Messages, Embed Links, Create Public Threads, Send Messages in Threads, and Manage Threads and Posts.'
         )],
         ephemeral: true
       });

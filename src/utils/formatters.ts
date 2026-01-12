@@ -36,21 +36,28 @@ export function formatLeaderboard(
 /**
  * Create embed for game rules
  */
-export function createRulesEmbed(): EmbedBuilder {
+export function createRulesEmbed(threadLink?: string): EmbedBuilder {
+  let description = 
+    '**Rules:**\n' +
+    '• 20 questions + 1 Final Jeopardy\n' +
+    '• Answer in chat (no need to phrase as question)\n' +
+    '• All messages sent during questions will be treated as answer attempts (but since there is no penalty for incorrect answers, go crazy!)\n' +
+    '• First correct answer wins the points\n' +
+    '• 30 seconds per question\n' +
+    '• 5 second break between questions\n' +
+    '• 30 second break between rounds\n' +
+    '• Final Jeopardy: Wager first, then answer\n\n';
+  
+  if (threadLink) {
+    description += `**Join the game thread:** ${threadLink}\n\n`;
+    description += 'We\'ll begin in 60 seconds!';
+  } else {
+    description += 'We\'ll begin in 60 seconds!';
+  }
+
   return new EmbedBuilder()
     .setTitle('🎮 Welcome to Trivia Creep!')
-    .setDescription(
-      '**Rules:**\n' +
-      '• 20 questions + 1 Final Jeopardy\n' +
-      '• Answer in chat (no need to phrase as question)\n' +
-      '• All messages sent during questions will be treated as answer attempts (but since there is no penalty for incorrect answers, go crazy!)\n' +
-      '• First correct answer wins the points\n' +
-      '• 30 seconds per question\n' +
-      '• 5 second break between questions\n' +
-      '• 30 second break between rounds\n' +
-      '• Final Jeopardy: Wager first, then answer\n\n' +
-      'We\'ll begin in 30 seconds!'
-    )
+    .setDescription(description)
     .setColor(0x0099FF)
     .setTimestamp();
 }
@@ -112,10 +119,11 @@ export function createLeaderboardEmbed(
  */
 export function createCorrectAnswerEmbed(
   username: string,
-  dollarAmount: number
+  dollarAmount: number,
+  answer: string
 ): EmbedBuilder {
   return new EmbedBuilder()
-    .setDescription(`✅ @${username} got it! +${formatCurrency(dollarAmount)}`)
+    .setDescription(`✅ @${username} got the correct answer of **${answer}**! +${formatCurrency(dollarAmount)}`)
     .setColor(0xFFD700)
     .setTimestamp();
 }

@@ -60,6 +60,9 @@ Before running the bot, you need to create and configure a Discord application:
      - ✅ Embed Links
      - ✅ Read Message History
      - ✅ Use Slash Commands
+     - ✅ Create Public Threads (required for trivia game threads)
+     - ✅ Send Messages in Threads (required for posting questions)
+     - ✅ Manage Threads and Posts (required for auto-deleting threads after games)
      - ✅ View Roles (recommended for role-based access control)
    - Copy the generated URL at the bottom
    - Open the URL in your browser to invite the bot to your server
@@ -143,12 +146,16 @@ Configure the trivia channel and optional role requirement for your server.
 
 #### `/start-trivia`
 Start a new trivia game. The game will:
+- Create a new thread for the game
+- Post game rules with a link to join the thread
+- Wait 60 seconds for players to join the thread
 - Pull 10 random questions from Round 1 (Jeopardy!)
 - Pull 10 random questions from Round 2 (Double Jeopardy!)
 - Pull 1 random question for Final Jeopardy
-- Display game rules and begin Round 1
+- Post all questions in the game thread
+- Post final results to both the thread and main channel
 
-**Note:** Only one trivia game can be active at a time per server.
+**Note:** Only one trivia game can be active at a time per server. All questions will be posted in the game thread, so make sure to join it when the game starts!
 
 #### `/end-trivia` (Admin Only)
 End the current trivia game early and archive it. Useful if a game needs to be stopped.
@@ -203,20 +210,25 @@ Submit your answer for Final Jeopardy (only available during Final Jeopardy answ
 
 ### Game Flow
 
-1. **Round 1 & 2:**
-   - Bot posts a question with category and dollar amount
-   - Players answer in the chat (no need to phrase as a question)
+1. **Game Start:**
+   - Bot creates a new thread for the game
+   - Bot posts game rules in the main channel with a link to join the thread
+   - Players have 60 seconds to join the thread before questions begin
+
+2. **Round 1 & 2:**
+   - Bot posts questions in the game thread (category and dollar amount)
+   - Players answer in the thread (no need to phrase as a question)
    - First correct answer wins the points
    - 30 seconds per question
    - 5 second break between questions
    - 30 second break between rounds
 
-2. **Final Jeopardy:**
-   - Bot posts the category
+3. **Final Jeopardy:**
+   - Bot posts the category in the thread
    - 30-second wagering phase (players use `/final-wager`)
-   - Bot posts the question
+   - Bot posts the question in the thread
    - 30-second answering phase (players use `/final-guess`)
-   - Bot calculates final scores and displays results
+   - Bot calculates final scores and displays results in both the thread and main channel
 
 ### Answer Validation
 
@@ -310,8 +322,9 @@ npm run dev
 
 ### Bot can't send messages
 - Check bot permissions in the configured trivia channel
-- Ensure the bot has "Send Messages" and "Embed Links" permissions
+- Ensure the bot has "Send Messages", "Embed Links", "Create Public Threads", "Send Messages in Threads", and "Manage Threads and Posts" permissions
 - Verify the channel still exists and hasn't been deleted
+- If the bot can't create threads, check that thread creation is enabled for the channel
 
 ## Future Development
 

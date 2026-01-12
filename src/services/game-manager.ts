@@ -1,4 +1,4 @@
-import { TextChannel, Message, MessageFlags, MessageCreateOptions } from 'discord.js';
+import { TextChannel, Message, MessageFlags, MessageCreateOptions, ThreadChannel } from 'discord.js';
 import { Question } from '../../helper-scripts/types';
 import { DatabaseService } from './database';
 import { validateAnswer } from './answer-validator';
@@ -48,6 +48,7 @@ export interface GameState {
   guildId: string;
   channelId: string;
   channel?: TextChannel;
+  thread?: ThreadChannel;
   status: GameStatus;
   currentRound: 'round1' | 'round2' | 'final';
   currentQuestionIndex: number;
@@ -68,6 +69,7 @@ export interface GameState {
     breakTimer?: NodeJS.Timeout;
     wageringTimer?: NodeJS.Timeout;
     answeringTimer?: NodeJS.Timeout;
+    threadDeletionTimer?: NodeJS.Timeout;
   };
 }
 
@@ -173,17 +175,42 @@ export class GameManager {
       logger.debug(`[GAME START DEBUG] Round 2 Question IDs loaded: ${JSON.stringify(round2Ids)}`);
       logger.debug(`[GAME START DEBUG] Final Question ID loaded: ${finalId}`);
 
-      // Post game rules immediately
+      // Create a thread for this game with timestamp
+      const startTime = new Date();
+      // Format timestamp using system timezone (should match server timezone)
+      // Format: YYYY-MM-DD HH:MM:SS in local time
+      const year = startTime.getFullYear();
+      const month = String(startTime.getMonth() + 1).padStart(2, '0');
+      const day = String(startTime.getDate()).padStart(2, '0');
+      const hours = String(startTime.getHours()).padStart(2, '0');
+      const minutes = String(startTime.getMinutes()).padStart(2, '0');
+      const seconds = String(startTime.getSeconds()).padStart(2, '0');
+      const timestamp = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      const thread = await channel.threads.create({
+        name: `Trivia ${timestamp}`,
+        autoArchiveDuration: 60, // 1 hour
+        reason: 'Trivia game thread'
+      });
+      this.gameState.thread = thread;
+      logger.info(`Created trivia thread: ${thread.id} with name: ${thread.name}`);
+
+      // Post game rules with thread link
+      const threadLink = `https://discord.com/channels/${guildId}/${thread.id}`;
+      
+      // Find and mention the trivia-nerds role
+      const triviaNerdsRole = channel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
+      const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
+      
       await channel.send({ 
-        embeds: [createRulesEmbed()],
-        flags: MessageFlags.SuppressNotifications
+        content: roleMention ? `${roleMention} Trivia is starting in 60 seconds!` : undefined,
+        embeds: [createRulesEmbed(threadLink)]
       });
 
       // Start normalization in background (in order: round1, round2, final)
       this.startNormalizationInBackground(round1Questions, round2Questions, finalQuestions[0] || null);
 
-      // Wait 30 seconds before starting
-      await new Promise(resolve => setTimeout(resolve, 30000));
+      // Wait 60 seconds before starting to give people time to join the thread
+      await new Promise(resolve => setTimeout(resolve, 60000));
 
       // Start Round 1
       this.gameState.status = 'ROUND_1';
@@ -295,7 +322,7 @@ export class GameManager {
    * Start a question
    */
   private async startQuestion(questionIndex: number, round: 'round1' | 'round2'): Promise<void> {
-    if (!this.gameState || !this.gameState.channel) {
+    if (!this.gameState || !this.gameState.thread) {
       return;
     }
 
@@ -315,7 +342,7 @@ export class GameManager {
       // Show leaderboard if players exist (except for first question)
       if (this.gameState.players.size > 0 && (questionIndex > 0 || round === 'round2')) {
         const leaderboard = this.getCurrentLeaderboard();
-        await this.gameState.channel.send({ 
+        await this.gameState.thread.send({ 
           embeds: [createLeaderboardEmbed(leaderboard)],
           flags: MessageFlags.SuppressNotifications
         });
@@ -333,7 +360,7 @@ export class GameManager {
         question.question
       );
 
-      await this.gameState.channel.send({ 
+      await this.gameState.thread.send({ 
         embeds: [embed],
         flags: MessageFlags.SuppressNotifications
       });
@@ -352,7 +379,11 @@ export class GameManager {
       return;
     }
 
-    if (message.channel.id !== this.gameState.channelId) {
+    // Accept messages from either the main channel or the game thread
+    const isMainChannel = message.channel.id === this.gameState.channelId;
+    const isThread = this.gameState.thread && message.channel.id === this.gameState.thread.id;
+    
+    if (!isMainChannel && !isThread) {
       return;
     }
 
@@ -399,7 +430,7 @@ export class GameManager {
       // Post success message
       if (message.channel.isTextBased() && 'send' in message.channel) {
         await (message.channel as TextChannel).send({ 
-          embeds: [createCorrectAnswerEmbed(message.author.username, dollarAmount)],
+          embeds: [createCorrectAnswerEmbed(message.author.username, dollarAmount, question.answer)],
           flags: MessageFlags.SuppressNotifications
         });
       }
@@ -415,7 +446,7 @@ export class GameManager {
    * Handle question timeout
    */
   private async handleQuestionTimeout(question: Question): Promise<void> {
-    if (!this.gameState || !this.gameState.channel) {
+    if (!this.gameState || !this.gameState.thread) {
       return;
     }
 
@@ -424,7 +455,7 @@ export class GameManager {
     }
 
     // Post time's up message
-    await this.gameState.channel.send({ 
+    await this.gameState.thread.send({ 
       embeds: [createTimesUpEmbed(question.answer)],
       flags: MessageFlags.SuppressNotifications
     });
@@ -467,7 +498,7 @@ export class GameManager {
    * Start round break
    */
   private async startRoundBreak(round: 1 | 2): Promise<void> {
-    if (!this.gameState || !this.gameState.channel) {
+    if (!this.gameState || !this.gameState.thread) {
       return;
     }
 
@@ -475,7 +506,7 @@ export class GameManager {
 
     const leaderboard = this.getCurrentLeaderboard();
     const embed = createRoundBreakEmbed(round, leaderboard);
-    await this.gameState.channel.send({ 
+    await this.gameState.thread.send({ 
       embeds: [embed],
       flags: MessageFlags.SuppressNotifications
     });
@@ -495,7 +526,7 @@ export class GameManager {
    * Start Final Jeopardy
    */
   private async startFinalJeopardy(): Promise<void> {
-    if (!this.gameState || !this.gameState.channel || !this.gameState.questions.final) {
+    if (!this.gameState || !this.gameState.thread || !this.gameState.questions.final) {
       return;
     }
 
@@ -508,7 +539,7 @@ export class GameManager {
       leaderboard
     );
 
-    await this.gameState.channel.send({ 
+    await this.gameState.thread.send({ 
       embeds: [embed],
       flags: MessageFlags.SuppressNotifications
     });
@@ -524,7 +555,7 @@ export class GameManager {
    * Start Final Jeopardy answering phase
    */
   private async startFinalJeopardyAnswering(): Promise<void> {
-    if (!this.gameState || !this.gameState.channel || !this.gameState.questions.final) {
+    if (!this.gameState || !this.gameState.thread || !this.gameState.questions.final) {
       return;
     }
 
@@ -535,7 +566,7 @@ export class GameManager {
       this.gameState.questions.final.question
     );
 
-    await this.gameState.channel.send({ 
+    await this.gameState.thread.send({ 
       embeds: [embed],
       flags: MessageFlags.SuppressNotifications
     });
@@ -596,23 +627,38 @@ export class GameManager {
       }
     }
 
-    // Post results
+    // Post results to thread only
     const resultsEmbed = createFinalJeopardyResultsEmbed(
       this.gameState.questions.final.answer,
       results
     );
-    await this.gameState.channel.send({ 
-      embeds: [resultsEmbed],
-      flags: MessageFlags.SuppressNotifications
-    });
+    
+    if (this.gameState.thread) {
+      await this.gameState.thread.send({ 
+        embeds: [resultsEmbed],
+        flags: MessageFlags.SuppressNotifications
+      });
+    }
 
-    // Post final leaderboard
+    // Post final leaderboard to both thread and main channel
     const leaderboard = this.getCurrentLeaderboard();
     const leaderboardEmbed = createFinalLeaderboardEmbed(leaderboard);
-    await this.gameState.channel.send({ 
-      embeds: [leaderboardEmbed],
-      flags: MessageFlags.SuppressNotifications
-    });
+    
+    // Post to thread
+    if (this.gameState.thread) {
+      await this.gameState.thread.send({ 
+        embeds: [leaderboardEmbed],
+        flags: MessageFlags.SuppressNotifications
+      });
+    }
+    
+    // Post to main channel
+    if (this.gameState.channel) {
+      await this.gameState.channel.send({ 
+        embeds: [leaderboardEmbed],
+        flags: MessageFlags.SuppressNotifications
+      });
+    }
 
     // Archive game
     await this.archiveGame();
@@ -676,6 +722,11 @@ export class GameManager {
     } catch (error) {
       logger.error('Error archiving game:', error);
     } finally {
+      // Schedule thread deletion before clearing game state
+      const thread = this.gameState?.thread;
+      if (thread) {
+        this.scheduleThreadDeletion(thread);
+      }
       this.clearAllTimers();
       this.gameState = null;
     }
@@ -713,12 +764,22 @@ export class GameManager {
       }
     }
 
-    // Post final leaderboard
+    // Post final leaderboard to both thread and main channel
+    const leaderboard = this.getCurrentLeaderboard();
+    const embed = createFinalLeaderboardEmbed(leaderboard);
+    embed.setTitle('🛑 Game Ended Early');
+    embed.setFooter({ text: 'Game has been archived.' });
+    
+    // Post to thread
+    if (this.gameState.thread) {
+      await this.gameState.thread.send({ 
+        embeds: [embed],
+        flags: MessageFlags.SuppressNotifications
+      });
+    }
+    
+    // Post to main channel
     if (this.gameState.channel) {
-      const leaderboard = this.getCurrentLeaderboard();
-      const embed = createFinalLeaderboardEmbed(leaderboard);
-      embed.setTitle('🛑 Game Ended Early');
-      embed.setFooter({ text: 'Game has been archived.' });
       await this.gameState.channel.send({ 
         embeds: [embed],
         flags: MessageFlags.SuppressNotifications
@@ -773,6 +834,12 @@ export class GameManager {
     } catch (error) {
       logger.error('Error archiving abandoned game:', error);
     } finally {
+      // Schedule thread deletion before clearing game state
+      const thread = this.gameState?.thread;
+      if (thread) {
+        this.scheduleThreadDeletion(thread);
+      }
+      this.clearAllTimers();
       this.gameState = null;
     }
   }
@@ -894,6 +961,24 @@ export class GameManager {
   }
 
   /**
+   * Schedule thread deletion 5 minutes after game ends
+   */
+  private scheduleThreadDeletion(thread: ThreadChannel): void {
+    // Schedule deletion in 5 minutes (300000 ms)
+    // Note: Timer is not stored in gameState since gameState will be cleared
+    // The closure keeps a reference to the thread, which is sufficient
+    setTimeout(async () => {
+      try {
+        await thread.delete('Trivia game completed - auto-cleanup');
+        logger.info(`Thread ${thread.id} deleted successfully after game completion`);
+      } catch (error) {
+        logger.error(`Failed to delete thread ${thread.id}:`, error);
+        // Thread might have already been deleted or bot lacks permissions
+      }
+    }, 300000); // 5 minutes
+  }
+
+  /**
    * Clear all timers
    */
   private clearAllTimers(): void {
@@ -912,6 +997,9 @@ export class GameManager {
     }
     if (this.gameState.timers.answeringTimer) {
       clearTimeout(this.gameState.timers.answeringTimer);
+    }
+    if (this.gameState.timers.threadDeletionTimer) {
+      clearTimeout(this.gameState.timers.threadDeletionTimer);
     }
 
     this.gameState.timers = {};

@@ -231,6 +231,17 @@ function normalizeSpec(raw: any, dbAnswer: string): AnswerSpec {
     const canon = normalizeText(dbAnswer);
     if (canon && !acceptedNorm.includes(canon)) acceptedNorm.unshift(canon);
 
+    // Include options and option_aliases in accepted for single mode
+    const optionsNorm = toStringArray(raw.options).map(normalizeText).filter(Boolean);
+    acceptedNorm.push(...optionsNorm);
+
+    // Add all option aliases to accepted
+    const option_aliases_in = (raw.option_aliases && typeof raw.option_aliases === "object") ? raw.option_aliases : {};
+    for (const key in option_aliases_in) {
+      const aliases = toStringArray(option_aliases_in[key]).map(normalizeText).filter(Boolean);
+      acceptedNorm.push(...aliases);
+    }
+
     let single: SingleSpec = {
       answer_mode: "single",
       accepted: Array.from(new Set(acceptedNorm)),
@@ -340,21 +351,15 @@ async function callLMStudio(question: string, answer: string, category: string |
     `answer_text: "${escapeJsonString(answer)}"\n\n` +
     `Return the JSON now.`;
 
-  // 1st attempt with schema
+  // Match the curl command exactly: no schema, direct call
   try {
-    const content = await callLMStudioOnce(userContent, true);
+    const content = await callLMStudioOnce(userContent, false);
     return extractFirstJsonObject(content);
   } catch {
-    // 2nd attempt: skip schema
-    try {
-      const content2 = await callLMStudioOnce(userContent, false);
-      return extractFirstJsonObject(content2);
-    } catch {
-      // 3rd attempt: repair prompt without schema
-      const repair = userContent + `\n\nOutput ONLY valid JSON. No commentary.`;
-      const content3 = await callLMStudioOnce(repair, false);
-      return extractFirstJsonObject(content3);
-    }
+    // Fallback: repair prompt
+    const repair = userContent + `\n\nOutput ONLY valid JSON. No commentary.`;
+    const content2 = await callLMStudioOnce(repair, false);
+    return extractFirstJsonObject(content2);
   }
 }
 
