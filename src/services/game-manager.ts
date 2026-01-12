@@ -2,6 +2,7 @@ import { TextChannel, Message, MessageFlags, MessageCreateOptions } from 'discor
 import { Question } from '../../helper-scripts/types';
 import { DatabaseService } from './database';
 import { validateAnswer } from './answer-validator';
+import { LMStudioService, AnswerSpec } from './lmstudio';
 import {
   createRulesEmbed,
   createQuestionEmbed,
@@ -55,6 +56,7 @@ export interface GameState {
     round2: Question[];
     final: Question | null;
   };
+  normalizedAnswers: Map<number, AnswerSpec>; // question_id -> AnswerSpec
   players: Map<string, PlayerState>;
   startTime: Date;
   currentQuestionStartTime?: Date;
@@ -73,9 +75,11 @@ export class GameManager {
   private static instance: GameManager;
   private gameState: GameState | null = null;
   private databaseService: DatabaseService;
+  private lmStudioService: LMStudioService;
 
   private constructor(databaseService: DatabaseService) {
     this.databaseService = databaseService;
+    this.lmStudioService = new LMStudioService();
   }
 
   static getInstance(databaseService: DatabaseService): GameManager {
@@ -137,6 +141,7 @@ export class GameManager {
         round2: [],
         final: null
       },
+      normalizedAnswers: new Map(),
       players: new Map(),
       startTime: new Date(),
       questionAnswered: false,
@@ -168,11 +173,14 @@ export class GameManager {
       logger.debug(`[GAME START DEBUG] Round 2 Question IDs loaded: ${JSON.stringify(round2Ids)}`);
       logger.debug(`[GAME START DEBUG] Final Question ID loaded: ${finalId}`);
 
-      // Post game rules
+      // Post game rules immediately
       await channel.send({ 
         embeds: [createRulesEmbed()],
         flags: MessageFlags.SuppressNotifications
       });
+
+      // Start normalization in background (in order: round1, round2, final)
+      this.startNormalizationInBackground(round1Questions, round2Questions, finalQuestions[0] || null);
 
       // Wait 30 seconds before starting
       await new Promise(resolve => setTimeout(resolve, 30000));
@@ -186,6 +194,101 @@ export class GameManager {
       this.gameState = null;
       throw error;
     }
+  }
+
+  /**
+   * Start normalization in background in the order questions will be asked
+   */
+  private async startNormalizationInBackground(
+    round1Questions: Question[],
+    round2Questions: Question[],
+    finalQuestion: Question | null
+  ): Promise<void> {
+    // Collect all question IDs
+    const allQuestionIds = [
+      ...round1Questions.map(q => q.id).filter((id): id is number => id !== undefined),
+      ...round2Questions.map(q => q.id).filter((id): id is number => id !== undefined),
+      ...(finalQuestion?.id ? [finalQuestion.id] : [])
+    ];
+
+    // Check if LMStudio server is running
+    const lmStudioRunning = await this.lmStudioService.isServerRunning();
+    logger.info(`LMStudio server is ${lmStudioRunning ? 'running' : 'not running'}`);
+
+    // Load existing normalized answers from database
+    const existingSpecs = await this.databaseService.getAnswerSpecs(allQuestionIds);
+    for (const [questionId, spec] of existingSpecs) {
+      this.gameState!.normalizedAnswers.set(questionId, spec);
+    }
+    logger.info(`Loaded ${existingSpecs.size} existing normalized answers from database`);
+
+    // If LMStudio is not running, we're done
+    if (!lmStudioRunning) {
+      const questionsNeedingNormalization = allQuestionIds.length - existingSpecs.size;
+      if (questionsNeedingNormalization > 0) {
+        logger.info(`LMStudio not running. ${questionsNeedingNormalization} questions will use fallback validation.`);
+      }
+      return;
+    }
+
+    // Build list of questions needing normalization in order: round1, round2, final
+    const questionsNeedingNormalization: Array<{ question: Question; id: number }> = [];
+    
+    // Round 1 questions first
+    for (const question of round1Questions) {
+      if (question.id && !this.gameState!.normalizedAnswers.has(question.id)) {
+        questionsNeedingNormalization.push({ question, id: question.id });
+      }
+    }
+    
+    // Round 2 questions second
+    for (const question of round2Questions) {
+      if (question.id && !this.gameState!.normalizedAnswers.has(question.id)) {
+        questionsNeedingNormalization.push({ question, id: question.id });
+      }
+    }
+    
+    // Final question last
+    if (finalQuestion && finalQuestion.id && !this.gameState!.normalizedAnswers.has(finalQuestion.id)) {
+      questionsNeedingNormalization.push({ question: finalQuestion, id: finalQuestion.id });
+    }
+
+    if (questionsNeedingNormalization.length === 0) {
+      logger.info('All answers already normalized');
+      return;
+    }
+
+    logger.info(`Normalizing ${questionsNeedingNormalization.length} answers in background using LMStudio...`);
+    
+    // Normalize questions sequentially in order (not parallel) to prioritize earlier questions
+    // This ensures round1 questions are normalized first
+    (async () => {
+      for (const { question, id } of questionsNeedingNormalization) {
+        try {
+          const spec = await this.lmStudioService.normalizeAnswer(
+            question.question,
+            question.answer,
+            question.category ?? null
+          );
+          
+          // Store in memory
+          if (this.gameState) {
+            this.gameState.normalizedAnswers.set(id, spec);
+          }
+          
+          // Store in database
+          await this.databaseService.storeAnswerSpec(id, spec);
+          
+          logger.debug(`Normalized answer for question_id=${id}`);
+        } catch (error) {
+          logger.error(`Failed to normalize answer for question_id=${id}:`, error);
+          // Continue with next question even if one fails
+        }
+      }
+      logger.info(`Background normalization complete`);
+    })().catch(error => {
+      logger.error('Error in background normalization:', error);
+    });
   }
 
   /**
@@ -274,8 +377,11 @@ export class GameManager {
       return;
     }
 
-    // Validate answer
-    const isCorrect = validateAnswer(message.content, question.answer);
+    // Get normalized answer spec if available
+    const normalizedSpec = question.id ? this.gameState.normalizedAnswers.get(question.id) : undefined;
+    
+    // Validate answer (use normalized spec if available, otherwise fallback)
+    const isCorrect = validateAnswer(message.content, question.answer, normalizedSpec);
 
     if (isCorrect) {
       // Clear timer
@@ -717,8 +823,13 @@ export class GameManager {
       throw new Error('Final Jeopardy question not found');
     }
 
-    // Validate answer
-    const isCorrect = validateAnswer(answer, this.gameState.questions.final.answer);
+    // Get normalized answer spec if available
+    const normalizedSpec = this.gameState.questions.final?.id 
+      ? this.gameState.normalizedAnswers.get(this.gameState.questions.final.id) 
+      : undefined;
+    
+    // Validate answer (use normalized spec if available, otherwise fallback)
+    const isCorrect = validateAnswer(answer, this.gameState.questions.final.answer, normalizedSpec);
     player.finalAnswer = answer;
     player.finalCorrect = isCorrect;
     player.participated = true;

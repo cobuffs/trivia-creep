@@ -511,4 +511,80 @@ export class DatabaseService {
       throw error;
     }
   }
+
+  // ==================== Answer Normalization ====================
+
+  /**
+   * Get normalized answer specs for multiple questions
+   * Returns a map of question_id -> AnswerSpec
+   */
+  async getAnswerSpecs(questionIds: number[]): Promise<Map<number, any>> {
+    const pool = getConnection();
+    const specs = new Map<number, any>();
+
+    if (questionIds.length === 0) {
+      return specs;
+    }
+
+    try {
+      // Use parameterized query with individual parameters for each ID
+      // SQL Server doesn't support array parameters, so we build the query safely
+      const request = pool.request();
+      const placeholders: string[] = [];
+      
+      questionIds.forEach((id, index) => {
+        const paramName = `id${index}`;
+        request.input(paramName, sql.Int, id);
+        placeholders.push(`@${paramName}`);
+      });
+
+      const result = await request.query(`
+        SELECT [question_id], [spec_json]
+        FROM [dbo].[question_answer_specs]
+        WHERE [question_id] IN (${placeholders.join(', ')})
+      `);
+
+      for (const row of result.recordset) {
+        try {
+          const spec = JSON.parse(row.spec_json);
+          specs.set(row.question_id, spec);
+        } catch (error) {
+          console.error(`Error parsing spec_json for question_id ${row.question_id}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('Error getting answer specs:', error);
+      throw error;
+    }
+
+    return specs;
+  }
+
+  /**
+   * Store normalized answer spec for a question
+   */
+  async storeAnswerSpec(questionId: number, spec: any): Promise<void> {
+    const pool = getConnection();
+    const specJson = JSON.stringify(spec);
+
+    try {
+      await pool
+        .request()
+        .input('question_id', sql.Int, questionId)
+        .input('spec_json', sql.NVarChar(sql.MAX), specJson)
+        .input('model', sql.VarChar(200), process.env.LM_MODEL || 'gemma-3-27b-it-heretic-v2-i1')
+        .input('prompt_version', sql.Int, Number(process.env.PROMPT_VERSION || '1'))
+        .query(`
+          INSERT INTO [dbo].[question_answer_specs] ([question_id], [spec_json], [model], [prompt_version])
+          VALUES (@question_id, @spec_json, @model, @prompt_version)
+        `);
+    } catch (error: any) {
+      // Ignore duplicate key errors (race condition protection)
+      if (error.number === 2627 || error.number === 2601) {
+        return;
+      }
+      console.error('Error storing answer spec:', error);
+      throw error;
+    }
+  }
 }
