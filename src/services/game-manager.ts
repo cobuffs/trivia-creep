@@ -80,6 +80,7 @@ export class GameManager {
   private gameState: GameState | null = null;
   private databaseService: DatabaseService;
   private lmStudioService: LMStudioService;
+  private messageProcessingLock: Promise<void> = Promise.resolve(); // Queue for sequential message processing
 
   private constructor(databaseService: DatabaseService) {
     this.databaseService = databaseService;
@@ -446,8 +447,25 @@ export class GameManager {
 
   /**
    * Handle a message during a question
+   * Uses a processing queue to ensure messages are handled sequentially and prevent race conditions
    */
   async handleMessage(message: Message): Promise<void> {
+    // Queue this message to be processed after previous messages complete
+    // This prevents race conditions when multiple messages arrive simultaneously
+    this.messageProcessingLock = this.messageProcessingLock.then(async () => {
+      await this.processMessage(message);
+    }).catch(error => {
+      logger.error('Error processing message:', error);
+    });
+    
+    // Wait for this message to be processed
+    await this.messageProcessingLock;
+  }
+
+  /**
+   * Internal method to process a single message
+   */
+  private async processMessage(message: Message): Promise<void> {
     if (!this.gameState || this.gameState.status !== 'ROUND_1' && this.gameState.status !== 'ROUND_2') {
       return;
     }
@@ -488,6 +506,10 @@ export class GameManager {
     }
 
     // Get normalized answer spec if available
+    // Note: We get a reference to the spec from the Map. Since normalization
+    // completes before the game starts, the spec should be stable. However,
+    // we still want to ensure we're working with the spec as it exists at
+    // validation time, so we capture it before validation.
     const normalizedSpec = question.id ? this.gameState.normalizedAnswers.get(question.id) : undefined;
     
     // Log validation details for debugging
