@@ -410,34 +410,37 @@ export class GameManager {
     this.gameState.currentQuestionIndex = questionIndex;
     this.gameState.currentRound = round;
     this.gameState.questionAnswered = false;
-    this.gameState.currentQuestionStartTime = new Date();
-    this.gameState.currentQuestionEndTime = new Date(Date.now() + 30000); // 30 seconds from now
 
-      // Show leaderboard if players exist (except for first question)
-      if (this.gameState.players.size > 0 && (questionIndex > 0 || round === 'round2')) {
-        const leaderboard = this.getCurrentLeaderboard();
-        await this.gameState.thread.send({ 
-          embeds: [createLeaderboardEmbed(leaderboard)],
-          flags: MessageFlags.SuppressNotifications
-        });
-        
-        // 5 second break between questions
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-
-      // Post question
-      const embed = createQuestionEmbed(
-        round === 'round1' ? 1 : 2,
-        questionIndex,
-        question.category || 'Unknown',
-        question.dollar_amount || 0,
-        question.question
-      );
-
+    // Show leaderboard if players exist (except for first question)
+    if (this.gameState.players.size > 0 && (questionIndex > 0 || round === 'round2')) {
+      const leaderboard = this.getCurrentLeaderboard();
       await this.gameState.thread.send({ 
-        embeds: [embed],
+        embeds: [createLeaderboardEmbed(leaderboard)],
         flags: MessageFlags.SuppressNotifications
       });
+      
+      // 5 second break between questions
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+
+    // Post question
+    const embed = createQuestionEmbed(
+      round === 'round1' ? 1 : 2,
+      questionIndex,
+      question.category || 'Unknown',
+      question.dollar_amount || 0,
+      question.question
+    );
+
+    const questionMessage = await this.gameState.thread.send({ 
+      embeds: [embed],
+      flags: MessageFlags.SuppressNotifications
+    });
+
+    // Set timing AFTER the question is visible to players
+    // Use the message timestamp for accuracy so the 30s window aligns with when users see the question
+    this.gameState.currentQuestionStartTime = questionMessage.createdAt;
+    this.gameState.currentQuestionEndTime = new Date(questionMessage.createdAt.getTime() + 30000);
 
     // Start 30-second timer
     this.gameState.timers.questionTimer = setTimeout(async () => {
