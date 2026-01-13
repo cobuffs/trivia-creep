@@ -44,17 +44,6 @@ export async function handleEndTriviaCommand(
       ephemeral: true
     });
 
-    // Also send a message to the trivia channel (with suppressed notifications)
-    if (gameState.channel && gameState.channel.isTextBased() && 'send' in gameState.channel) {
-      await (gameState.channel as TextChannel).send({
-        embeds: [createSuccessEmbed(
-          'Game Ended',
-          `🛑 Trivia game ended early by @${interaction.user.username}\n\nFinal leaderboard posted above.\n\nGame has been archived.`
-        )],
-        flags: MessageFlags.SuppressNotifications
-      });
-    }
-
     logger.info(`Game ended early by ${interaction.user.tag} in guild ${interaction.guildId}`);
   } catch (error) {
     logger.error('Error ending trivia game:', error);

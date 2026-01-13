@@ -1,4 +1,5 @@
 import { EmbedBuilder, ColorResolvable } from 'discord.js';
+import { formatDateTime } from './datetime-parser';
 
 /**
  * Format currency amount as dollar string
@@ -36,7 +37,7 @@ export function formatLeaderboard(
 /**
  * Create embed for game rules
  */
-export function createRulesEmbed(threadLink?: string): EmbedBuilder {
+export function createRulesEmbed(threadLink?: string, scheduledStartTime?: Date): EmbedBuilder {
   let description = 
     '**Rules:**\n' +
     '• 20 questions + 1 Final Jeopardy\n' +
@@ -50,7 +51,12 @@ export function createRulesEmbed(threadLink?: string): EmbedBuilder {
   
   if (threadLink) {
     description += `**Join the game thread:** ${threadLink}\n\n`;
-    description += 'We\'ll begin in 60 seconds!';
+  }
+  
+  if (scheduledStartTime) {
+    const formattedTime = formatDateTime(scheduledStartTime);
+    description += `**Game will start at:** ${formattedTime}\n\n`;
+    description += 'A reminder will be sent 15 minutes before the game begins!';
   } else {
     description += 'We\'ll begin in 60 seconds!';
   }

@@ -112,6 +112,34 @@ async function createBotTables(): Promise<void> {
     
     await pool.request().query(addRequiredRoleColumn);
     console.log('✓ required_role_id column added (if needed)');
+
+    // Create scheduled_games table
+    const createScheduledGamesTable = `
+      IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[scheduled_games]') AND type in (N'U'))
+      BEGIN
+        CREATE TABLE [dbo].[scheduled_games] (
+          [scheduled_game_id] INT IDENTITY(1,1) PRIMARY KEY,
+          [guild_id] NVARCHAR(255) NOT NULL,
+          [channel_id] NVARCHAR(255) NOT NULL,
+          [thread_id] NVARCHAR(255) NOT NULL,
+          [scheduled_start_time] DATETIME2 NOT NULL,
+          [reminder_sent] BIT NOT NULL DEFAULT 0,
+          [round1_questions] NVARCHAR(MAX) NOT NULL,
+          [round2_questions] NVARCHAR(MAX) NOT NULL,
+          [final_question_id] INT NOT NULL,
+          [normalized_answers] NVARCHAR(MAX) NULL,
+          [created_at] DATETIME2 NOT NULL DEFAULT GETDATE(),
+          [created_by_user_id] NVARCHAR(255) NOT NULL
+        );
+        
+        CREATE INDEX IX_scheduled_games_guild_id ON [dbo].[scheduled_games]([guild_id]);
+        CREATE INDEX IX_scheduled_games_scheduled_start_time ON [dbo].[scheduled_games]([scheduled_start_time]);
+        CREATE INDEX IX_scheduled_games_reminder_sent ON [dbo].[scheduled_games]([reminder_sent]);
+      END
+    `;
+
+    await pool.request().query(createScheduledGamesTable);
+    console.log('✓ scheduled_games table created');
     
     console.log('\nAll bot tables created successfully!');
   } catch (error) {

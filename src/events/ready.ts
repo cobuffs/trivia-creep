@@ -1,5 +1,8 @@
 import { Client, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import { logger } from '../utils/logger';
+import { DatabaseService } from '../services/database';
+import { GameManager } from '../services/game-manager';
+import { SchedulerService } from '../services/scheduler';
 
 // Command definitions
 const commands = [
@@ -22,7 +25,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('start-trivia')
-    .setDescription('Start a new trivia game')
+    .setDescription('Start a new trivia game immediately or schedule it for later')
     .toJSON(),
 
   new SlashCommandBuilder()
@@ -75,7 +78,12 @@ const commands = [
     .toJSON()
 ];
 
-export async function handleReady(client: Client) {
+export async function handleReady(
+  client: Client,
+  databaseService: DatabaseService,
+  gameManager: GameManager,
+  schedulerService: SchedulerService
+) {
   logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
 
   // Register slash commands
@@ -97,6 +105,9 @@ export async function handleReady(client: Client) {
     );
 
     logger.info(`Successfully registered ${commands.length} application (/) commands.`);
+
+    // Initialize scheduler service (async - loads games from database)
+    await schedulerService.initialize(client);
 
     // Set bot status
     client.user?.setActivity('Trivia Games', { type: 0 }); // Playing

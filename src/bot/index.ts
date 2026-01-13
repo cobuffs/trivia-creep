@@ -2,6 +2,7 @@ import { Client, GatewayIntentBits, Collection } from 'discord.js';
 import dotenv from 'dotenv';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
+import { SchedulerService } from '../services/scheduler';
 import { logger } from '../utils/logger';
 import { handleReady } from '../events/ready';
 import { handleInteraction } from '../events/interactionCreate';
@@ -28,13 +29,14 @@ const client = new Client({
 // Initialize services
 const databaseService = new DatabaseService();
 const gameManager = GameManager.getInstance(databaseService);
+const schedulerService = SchedulerService.getInstance(databaseService, gameManager);
 
 // Initialize commands collection
 client.commands = new Collection();
 
 // Set up event handlers
-client.once('ready', () => handleReady(client));
-client.on('interactionCreate', (interaction) => handleInteraction(interaction, databaseService, gameManager));
+client.once('ready', () => handleReady(client, databaseService, gameManager, schedulerService));
+client.on('interactionCreate', (interaction) => handleInteraction(interaction, databaseService, gameManager, schedulerService));
 client.on('messageCreate', (message) => handleMessage(message, gameManager));
 
 // Handle graceful shutdown
@@ -76,4 +78,4 @@ async function startBot() {
 // Start the bot
 startBot();
 
-export { client, databaseService, gameManager };
+export { client, databaseService, gameManager, schedulerService };

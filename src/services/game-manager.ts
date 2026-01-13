@@ -14,6 +14,7 @@ import {
   createFinalJeopardyQuestionEmbed,
   createFinalJeopardyResultsEmbed,
   createFinalLeaderboardEmbed,
+  createInfoEmbed,
   formatCurrency
 } from '../utils/formatters';
 import { logger } from '../utils/logger';
@@ -61,6 +62,7 @@ export interface GameState {
   players: Map<string, PlayerState>;
   startTime: Date;
   currentQuestionStartTime?: Date;
+  currentQuestionEndTime?: Date;
   wageringPhaseEndTime?: Date;
   answeringPhaseEndTime?: Date;
   questionAnswered: boolean;
@@ -224,6 +226,87 @@ export class GameManager {
   }
 
   /**
+   * Start a scheduled trivia game (with pre-loaded questions and thread)
+   */
+  async startScheduledGame(
+    guildId: string,
+    channelId: string,
+    channel: TextChannel,
+    thread: ThreadChannel,
+    round1Questions: Question[],
+    round2Questions: Question[],
+    finalQuestion: Question,
+    normalizedAnswers: Map<number, AnswerSpec>
+  ): Promise<void> {
+    if (this.isGameActive()) {
+      throw new Error('A trivia game is already in progress');
+    }
+
+    logger.info(`Starting scheduled trivia game for guild ${guildId}`);
+
+    // Set status to STARTING
+    this.gameState = {
+      gameId: `game_${Date.now()}`,
+      guildId,
+      channelId,
+      channel,
+      thread,
+      status: 'STARTING',
+      currentRound: 'round1',
+      currentQuestionIndex: 0,
+      questions: {
+        round1: round1Questions,
+        round2: round2Questions,
+        final: finalQuestion
+      },
+      normalizedAnswers,
+      players: new Map(),
+      startTime: new Date(),
+      questionAnswered: false,
+      timers: {}
+    };
+
+    try {
+      // Debug: Log question IDs when questions are loaded
+      const round1Ids = round1Questions.map(q => q.id).filter((id): id is number => id !== undefined);
+      const round2Ids = round2Questions.map(q => q.id).filter((id): id is number => id !== undefined);
+      const finalId = finalQuestion?.id;
+      logger.debug(`[SCHEDULED GAME START DEBUG] Round 1 Question IDs loaded: ${JSON.stringify(round1Ids)}`);
+      logger.debug(`[SCHEDULED GAME START DEBUG] Round 2 Question IDs loaded: ${JSON.stringify(round2Ids)}`);
+      logger.debug(`[SCHEDULED GAME START DEBUG] Final Question ID loaded: ${finalId}`);
+
+      // Post game rules to thread (no 60-second wait for scheduled games)
+      const threadLink = `https://discord.com/channels/${guildId}/${thread.id}`;
+      
+      // Find and mention the trivia-nerds role
+      const triviaNerdsRole = channel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
+      const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
+      
+      await channel.send({ 
+        content: roleMention ? `${roleMention} Scheduled trivia is starting now!` : undefined,
+        embeds: [createRulesEmbed(threadLink)]
+      });
+
+      // Post to thread as well
+      await thread.send({
+        embeds: [createInfoEmbed(
+          '🎮 Game Starting',
+          'The scheduled trivia game is starting now! Get ready!'
+        )]
+      });
+
+      // Start Round 1 immediately (no wait for scheduled games)
+      this.gameState.status = 'ROUND_1';
+      await this.startQuestion(0, 'round1');
+
+    } catch (error) {
+      logger.error('Error starting scheduled game:', error);
+      this.gameState = null;
+      throw error;
+    }
+  }
+
+  /**
    * Start normalization in background in the order questions will be asked
    */
   private async startNormalizationInBackground(
@@ -338,6 +421,7 @@ export class GameManager {
     this.gameState.currentRound = round;
     this.gameState.questionAnswered = false;
     this.gameState.currentQuestionStartTime = new Date();
+    this.gameState.currentQuestionEndTime = new Date(Date.now() + 30000); // 30 seconds from now
 
       // Show leaderboard if players exist (except for first question)
       if (this.gameState.players.size > 0 && (questionIndex > 0 || round === 'round2')) {
@@ -394,8 +478,14 @@ export class GameManager {
     // Mark player as participated
     this.markPlayerParticipated(message.author.id, message.author.username);
 
-    // Check if question already answered
+    // Check if question already answered (atomic check)
     if (this.gameState.questionAnswered) {
+      return;
+    }
+
+    // Check if time has expired - reject answers that come in after the timeout
+    const now = new Date();
+    if (this.gameState.currentQuestionEndTime && now > this.gameState.currentQuestionEndTime) {
       return;
     }
 
@@ -415,13 +505,25 @@ export class GameManager {
     const isCorrect = validateAnswer(message.content, question.answer, normalizedSpec);
 
     if (isCorrect) {
+      // Double-check time hasn't expired while we were validating (race condition protection)
+      const checkTime = new Date();
+      if (this.gameState.currentQuestionEndTime && checkTime > this.gameState.currentQuestionEndTime) {
+        return;
+      }
+
+      // Atomic check-and-set: check again if question was answered while we were validating
+      if (this.gameState.questionAnswered) {
+        return;
+      }
+
+      // Set answered flag before clearing timer to prevent race condition
+      this.gameState.questionAnswered = true;
+
       // Clear timer
       if (this.gameState.timers.questionTimer) {
         clearTimeout(this.gameState.timers.questionTimer);
         this.gameState.timers.questionTimer = undefined;
       }
-
-      this.gameState.questionAnswered = true;
 
       // Award points
       const dollarAmount = question.dollar_amount || 0;
@@ -450,9 +552,20 @@ export class GameManager {
       return;
     }
 
+    // Atomic check: if question was answered, don't proceed
     if (this.gameState.questionAnswered) {
       return;
     }
+
+    // Double-check timestamp to ensure we're actually past the timeout
+    const now = new Date();
+    if (this.gameState.currentQuestionEndTime && now < this.gameState.currentQuestionEndTime) {
+      // Timer fired early somehow, don't proceed
+      return;
+    }
+
+    // Set answered flag to prevent any late-arriving answers from being processed
+    this.gameState.questionAnswered = true;
 
     // Post time's up message
     await this.gameState.thread.send({ 
@@ -764,24 +877,38 @@ export class GameManager {
       }
     }
 
+    // Post "Game Ended Early" message to thread
+    if (this.gameState.thread) {
+      await this.gameState.thread.send({ 
+        embeds: [createInfoEmbed(
+          '🛑 Game Ended Early',
+          'The trivia game has been ended early. Final leaderboard below.'
+        )],
+        flags: MessageFlags.SuppressNotifications
+      });
+    }
+
     // Post final leaderboard to both thread and main channel
     const leaderboard = this.getCurrentLeaderboard();
-    const embed = createFinalLeaderboardEmbed(leaderboard);
-    embed.setTitle('🛑 Game Ended Early');
-    embed.setFooter({ text: 'Game has been archived.' });
+    const threadEmbed = createFinalLeaderboardEmbed(leaderboard);
+    threadEmbed.setTitle('🛑 Game Ended Early - Final Leaderboard');
+    threadEmbed.setFooter({ text: 'Game has been archived.' });
+    
+    const channelEmbed = createFinalLeaderboardEmbed(leaderboard);
+    channelEmbed.setFooter({ text: 'Game has been archived.' });
     
     // Post to thread
     if (this.gameState.thread) {
       await this.gameState.thread.send({ 
-        embeds: [embed],
+        embeds: [threadEmbed],
         flags: MessageFlags.SuppressNotifications
       });
     }
     
-    // Post to main channel
+    // Post to main channel (without "Game Ended Early" in title)
     if (this.gameState.channel) {
       await this.gameState.channel.send({ 
-        embeds: [embed],
+        embeds: [channelEmbed],
         flags: MessageFlags.SuppressNotifications
       });
     }

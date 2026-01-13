@@ -105,6 +105,7 @@ This will create the following tables:
 - `game_players` - Tracks player participation and scores
 - `player_statistics` - Aggregated player statistics
 - `guild_config` - Per-guild configuration (trivia channel)
+- `scheduled_games` - Stores scheduled trivia games (for future start times)
 
 3. (Optional) Scrape some questions to get started:
 
@@ -145,17 +146,52 @@ Configure the trivia channel and optional role requirement for your server.
 ```
 
 #### `/start-trivia`
-Start a new trivia game. The game will:
-- Create a new thread for the game
-- Post game rules with a link to join the thread
-- Wait 60 seconds for players to join the thread
-- Pull 10 random questions from Round 1 (Jeopardy!)
-- Pull 10 random questions from Round 2 (Double Jeopardy!)
-- Pull 1 random question for Final Jeopardy
-- Post all questions in the game thread
-- Post final results to both the thread and main channel
+Start a new trivia game immediately or schedule it for a future time.
 
-**Note:** Only one trivia game can be active at a time per server. All questions will be posted in the game thread, so make sure to join it when the game starts!
+- **Options:** None - The command will show you two buttons to choose from.
+
+**When you run the command:**
+- Bot displays two buttons:
+  - **"Start Now"** - Begin the game immediately
+  - **"Schedule for Later"** - Open a date/time picker modal to schedule the game
+- Click your preferred option to proceed
+
+**When starting immediately (via "Start Now" button):**
+- Creates a new thread for the game
+- Posts game rules with a link to join the thread
+- Waits 60 seconds for players to join the thread
+- Pulls 10 random questions from Round 1 (Jeopardy!)
+- Pulls 10 random questions from Round 2 (Double Jeopardy!)
+- Pulls 1 random question for Final Jeopardy
+- Posts all questions in the game thread
+- Posts final results to both the thread and main channel
+
+**When scheduling for a future time (via "Schedule for Later" button):**
+- Opens a modal with date and time inputs
+- Creates the thread immediately with the scheduled time in the name
+- Posts an initial message with game rules and thread link
+- Fetches all 21 questions (10 Round 1, 10 Round 2, 1 Final)
+- Normalizes all answers immediately (so they're ready when the game starts)
+- Stores the scheduled game in the database
+- Sends a reminder 15 minutes before the scheduled start time
+- Automatically starts the game at the scheduled time
+
+**Scheduling Modal:**
+When using the "Schedule for Later" button, a modal will appear with:
+- **Date field** - Enter date in YYYY-MM-DD format (e.g., `2024-01-15`)
+- **Time field** - Enter time in HH:MM format (24-hour, e.g., `20:00` for 8:00 PM)
+
+**Example:**
+```
+/start-trivia
+```
+
+**Note:** 
+- Only one trivia game can be active at a time per server
+- Scheduled games must be at least a few seconds in the future
+- Scheduled games cannot be more than 365 days (1 year) in the future
+- All questions will be posted in the game thread, so make sure to join it when the game starts!
+- When scheduling, all answer normalization happens immediately so answers are ready when the game starts
 
 #### `/end-trivia` (Admin Only)
 End the current trivia game early and archive it. Useful if a game needs to be stopped.
@@ -210,7 +246,12 @@ Submit your answer for Final Jeopardy (only available during Final Jeopardy answ
 
 ### Game Flow
 
+#### Immediate Games
+
 1. **Game Start:**
+   - User runs `/start-trivia` with no options
+   - Bot displays two buttons: "Start Now" and "Schedule for Later"
+   - User clicks "Start Now" button
    - Bot creates a new thread for the game
    - Bot posts game rules in the main channel with a link to join the thread
    - Players have 60 seconds to join the thread before questions begin
@@ -229,6 +270,30 @@ Submit your answer for Final Jeopardy (only available during Final Jeopardy answ
    - Bot posts the question in the thread
    - 30-second answering phase (players use `/final-guess`)
    - Bot calculates final scores and displays results in both the thread and main channel
+
+#### Scheduled Games
+
+1. **Scheduling:**
+   - User runs `/start-trivia` with no options, then clicks "Schedule for Later" button
+   - OR user runs `/start-trivia` with a `scheduled-time` option
+   - If using the button, a modal appears for date/time selection
+   - When you schedule a game, the bot immediately:
+     - Creates a thread with the scheduled time in the name
+     - Posts an initial message with rules and thread link
+     - Fetches all 21 questions (10 Round 1, 10 Round 2, 1 Final)
+     - Normalizes all answers immediately (waits for completion, so answers are ready when the game starts)
+     - Stores everything in the database (including normalized answers)
+
+2. **15 Minutes Before Start:**
+   - Bot automatically sends a reminder to both the main channel and thread
+   - Reminder includes the exact start time and thread link
+
+3. **At Scheduled Time:**
+   - Bot automatically starts the game using the pre-loaded questions
+   - No 60-second wait (game starts immediately)
+   - Game proceeds normally through all rounds
+
+**Note:** The scheduler service runs continuously, checking every 30 seconds for games to start and reminders to send.
 
 ### Answer Validation
 
@@ -283,6 +348,7 @@ Stores trivia questions with the following flexible schema:
 - `game_players` - Player participation and scores per game
 - `player_statistics` - Aggregated player statistics
 - `guild_config` - Per-guild configuration
+- `scheduled_games` - Scheduled trivia games (stores questions, normalized answers, and start times)
 
 See [plans/02-database-schema.md](plans/02-database-schema.md) for detailed schema information.
 
@@ -325,6 +391,17 @@ npm run dev
 - Ensure the bot has "Send Messages", "Embed Links", "Create Public Threads", "Send Messages in Threads", and "Manage Threads and Posts" permissions
 - Verify the channel still exists and hasn't been deleted
 - If the bot can't create threads, check that thread creation is enabled for the channel
+
+## Features
+
+- ✅ Jeopardy-style trivia games with 20 questions + Final Jeopardy
+- ✅ Scheduled games (schedule trivia for future times)
+- ✅ Automatic reminders (15 minutes before scheduled games)
+- ✅ Intelligent answer validation with LMStudio integration
+- ✅ Leaderboards (all-time, monthly, yearly)
+- ✅ Player statistics tracking
+- ✅ Thread-based game organization
+- ✅ Final Jeopardy wagering system
 
 ## Future Development
 

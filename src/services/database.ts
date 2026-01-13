@@ -98,6 +98,21 @@ export interface LeaderboardEntry {
   gamesPlayed: number;
 }
 
+export interface ScheduledGame {
+  scheduledGameId: number;
+  guildId: string;
+  channelId: string;
+  threadId: string;
+  scheduledStartTime: Date;
+  reminderSent: boolean;
+  round1Questions: number[];
+  round2Questions: number[];
+  finalQuestionId: number;
+  normalizedAnswers: Map<number, any> | null;
+  createdAt: Date;
+  createdByUserId: string;
+}
+
 export class DatabaseService {
   /**
    * Initialize database connection
@@ -584,6 +599,343 @@ export class DatabaseService {
         return;
       }
       console.error('Error storing answer spec:', error);
+      throw error;
+    }
+  }
+
+  // ==================== Scheduled Games ====================
+
+  /**
+   * Create a scheduled game
+   */
+  async createScheduledGame(
+    guildId: string,
+    channelId: string,
+    threadId: string,
+    scheduledStartTime: Date,
+    round1QuestionIds: number[],
+    round2QuestionIds: number[],
+    finalQuestionId: number,
+    normalizedAnswers: Map<number, any> | null,
+    createdByUserId: string
+  ): Promise<number> {
+    const pool = getConnection();
+    try {
+      const normalizedAnswersJson = normalizedAnswers 
+        ? JSON.stringify(Array.from(normalizedAnswers.entries()))
+        : null;
+
+      const result = await pool
+        .request()
+        .input('guild_id', sql.NVarChar, guildId)
+        .input('channel_id', sql.NVarChar, channelId)
+        .input('thread_id', sql.NVarChar, threadId)
+        .input('scheduled_start_time', sql.DateTime2, scheduledStartTime)
+        .input('round1_questions', sql.NVarChar(sql.MAX), JSON.stringify(round1QuestionIds))
+        .input('round2_questions', sql.NVarChar(sql.MAX), JSON.stringify(round2QuestionIds))
+        .input('final_question_id', sql.Int, finalQuestionId)
+        .input('normalized_answers', sql.NVarChar(sql.MAX), normalizedAnswersJson)
+        .input('created_by_user_id', sql.NVarChar, createdByUserId)
+        .query(`
+          INSERT INTO [dbo].[scheduled_games]
+          ([guild_id], [channel_id], [thread_id], [scheduled_start_time], [round1_questions], [round2_questions], [final_question_id], [normalized_answers], [created_by_user_id])
+          OUTPUT INSERTED.[scheduled_game_id]
+          VALUES (@guild_id, @channel_id, @thread_id, @scheduled_start_time, @round1_questions, @round2_questions, @final_question_id, @normalized_answers, @created_by_user_id)
+        `);
+
+      return result.recordset[0].scheduled_game_id;
+    } catch (error) {
+      console.error('Error creating scheduled game:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get scheduled games that need to start
+   */
+  async getScheduledGamesToStart(now: Date): Promise<ScheduledGame[]> {
+    const pool = getConnection();
+    try {
+      const result = await pool
+        .request()
+        .input('now', sql.DateTime2, now)
+        .query(`
+          SELECT 
+            [scheduled_game_id],
+            [guild_id],
+            [channel_id],
+            [thread_id],
+            [scheduled_start_time],
+            [reminder_sent],
+            [round1_questions],
+            [round2_questions],
+            [final_question_id],
+            [normalized_answers],
+            [created_at],
+            [created_by_user_id]
+          FROM [dbo].[scheduled_games]
+          WHERE [scheduled_start_time] <= @now
+          ORDER BY [scheduled_start_time] ASC
+        `);
+
+      return result.recordset.map((row: any) => {
+        const normalizedAnswers: Map<number, any> | null = row.normalized_answers
+          ? new Map<number, any>(JSON.parse(row.normalized_answers) as Array<[number, any]>)
+          : null;
+
+        return {
+          scheduledGameId: row.scheduled_game_id,
+          guildId: row.guild_id,
+          channelId: row.channel_id,
+          threadId: row.thread_id,
+          scheduledStartTime: row.scheduled_start_time,
+          reminderSent: row.reminder_sent,
+          round1Questions: JSON.parse(row.round1_questions),
+          round2Questions: JSON.parse(row.round2_questions),
+          finalQuestionId: row.final_question_id,
+          normalizedAnswers,
+          createdAt: row.created_at,
+          createdByUserId: row.created_by_user_id
+        };
+      });
+    } catch (error) {
+      console.error('Error getting scheduled games to start:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get scheduled games that need reminders (15 minutes before start)
+   */
+  async getScheduledGamesNeedingReminders(now: Date): Promise<ScheduledGame[]> {
+    const pool = getConnection();
+    try {
+      // 15 minutes = 900000 milliseconds
+      // Check for games scheduled between 14.5 and 15.5 minutes from now
+      // This accounts for the 30-second check interval
+      const minReminderTime = new Date(now.getTime() + 870000); // 14.5 minutes
+      const maxReminderTime = new Date(now.getTime() + 930000); // 15.5 minutes
+
+      const result = await pool
+        .request()
+        .input('min_reminder_time', sql.DateTime2, minReminderTime)
+        .input('max_reminder_time', sql.DateTime2, maxReminderTime)
+        .query(`
+          SELECT 
+            [scheduled_game_id],
+            [guild_id],
+            [channel_id],
+            [thread_id],
+            [scheduled_start_time],
+            [reminder_sent],
+            [round1_questions],
+            [round2_questions],
+            [final_question_id],
+            [normalized_answers],
+            [created_at],
+            [created_by_user_id]
+          FROM [dbo].[scheduled_games]
+          WHERE [scheduled_start_time] >= @min_reminder_time
+            AND [scheduled_start_time] <= @max_reminder_time
+            AND [reminder_sent] = 0
+          ORDER BY [scheduled_start_time] ASC
+        `);
+
+      return result.recordset.map((row: any) => {
+        const normalizedAnswers: Map<number, any> | null = row.normalized_answers
+          ? new Map<number, any>(JSON.parse(row.normalized_answers) as Array<[number, any]>)
+          : null;
+
+        return {
+          scheduledGameId: row.scheduled_game_id,
+          guildId: row.guild_id,
+          channelId: row.channel_id,
+          threadId: row.thread_id,
+          scheduledStartTime: row.scheduled_start_time,
+          reminderSent: row.reminder_sent,
+          round1Questions: JSON.parse(row.round1_questions),
+          round2Questions: JSON.parse(row.round2_questions),
+          finalQuestionId: row.final_question_id,
+          normalizedAnswers,
+          createdAt: row.created_at,
+          createdByUserId: row.created_by_user_id
+        };
+      });
+    } catch (error) {
+      console.error('Error getting scheduled games needing reminders:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark reminder as sent for a scheduled game
+   */
+  async markReminderSent(scheduledGameId: number): Promise<void> {
+    const pool = getConnection();
+    try {
+      await pool
+        .request()
+        .input('scheduled_game_id', sql.Int, scheduledGameId)
+        .query(`
+          UPDATE [dbo].[scheduled_games]
+          SET [reminder_sent] = 1
+          WHERE [scheduled_game_id] = @scheduled_game_id
+        `);
+    } catch (error) {
+      console.error('Error marking reminder as sent:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a scheduled game
+   */
+  async deleteScheduledGame(scheduledGameId: number): Promise<void> {
+    const pool = getConnection();
+    try {
+      await pool
+        .request()
+        .input('scheduled_game_id', sql.Int, scheduledGameId)
+        .query(`
+          DELETE FROM [dbo].[scheduled_games]
+          WHERE [scheduled_game_id] = @scheduled_game_id
+        `);
+    } catch (error) {
+      console.error('Error deleting scheduled game:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update normalized answers for a scheduled game
+   */
+  async updateScheduledGameNormalizedAnswers(
+    scheduledGameId: number,
+    normalizedAnswers: Map<number, any>
+  ): Promise<void> {
+    const pool = getConnection();
+    try {
+      const normalizedAnswersJson = JSON.stringify(Array.from(normalizedAnswers.entries()));
+
+      await pool
+        .request()
+        .input('scheduled_game_id', sql.Int, scheduledGameId)
+        .input('normalized_answers', sql.NVarChar(sql.MAX), normalizedAnswersJson)
+        .query(`
+          UPDATE [dbo].[scheduled_games]
+          SET [normalized_answers] = @normalized_answers
+          WHERE [scheduled_game_id] = @scheduled_game_id
+        `);
+    } catch (error) {
+      console.error('Error updating scheduled game normalized answers:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all future scheduled games (for loading into memory)
+   */
+  async getAllFutureScheduledGames(): Promise<ScheduledGame[]> {
+    const pool = getConnection();
+    try {
+      const result = await pool
+        .request()
+        .query(`
+          SELECT 
+            [scheduled_game_id],
+            [guild_id],
+            [channel_id],
+            [thread_id],
+            [scheduled_start_time],
+            [reminder_sent],
+            [round1_questions],
+            [round2_questions],
+            [final_question_id],
+            [normalized_answers],
+            [created_at],
+            [created_by_user_id]
+          FROM [dbo].[scheduled_games]
+          WHERE [scheduled_start_time] > GETDATE()
+          ORDER BY [scheduled_start_time] ASC
+        `);
+
+      return result.recordset.map((row: any) => {
+        const normalizedAnswers: Map<number, any> | null = row.normalized_answers
+          ? new Map<number, any>(JSON.parse(row.normalized_answers) as Array<[number, any]>)
+          : null;
+
+        return {
+          scheduledGameId: row.scheduled_game_id,
+          guildId: row.guild_id,
+          channelId: row.channel_id,
+          threadId: row.thread_id,
+          scheduledStartTime: row.scheduled_start_time,
+          reminderSent: row.reminder_sent,
+          round1Questions: JSON.parse(row.round1_questions),
+          round2Questions: JSON.parse(row.round2_questions),
+          finalQuestionId: row.final_question_id,
+          normalizedAnswers,
+          createdAt: row.created_at,
+          createdByUserId: row.created_by_user_id
+        };
+      });
+    } catch (error) {
+      console.error('Error getting all future scheduled games:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all scheduled games for a guild
+   */
+  async getScheduledGamesForGuild(guildId: string): Promise<ScheduledGame[]> {
+    const pool = getConnection();
+    try {
+      const result = await pool
+        .request()
+        .input('guild_id', sql.NVarChar, guildId)
+        .query(`
+          SELECT 
+            [scheduled_game_id],
+            [guild_id],
+            [channel_id],
+            [thread_id],
+            [scheduled_start_time],
+            [reminder_sent],
+            [round1_questions],
+            [round2_questions],
+            [final_question_id],
+            [normalized_answers],
+            [created_at],
+            [created_by_user_id]
+          FROM [dbo].[scheduled_games]
+          WHERE [guild_id] = @guild_id
+            AND [scheduled_start_time] > GETDATE()
+          ORDER BY [scheduled_start_time] ASC
+        `);
+
+      return result.recordset.map((row: any) => {
+        const normalizedAnswers: Map<number, any> | null = row.normalized_answers
+          ? new Map<number, any>(JSON.parse(row.normalized_answers) as Array<[number, any]>)
+          : null;
+
+        return {
+          scheduledGameId: row.scheduled_game_id,
+          guildId: row.guild_id,
+          channelId: row.channel_id,
+          threadId: row.thread_id,
+          scheduledStartTime: row.scheduled_start_time,
+          reminderSent: row.reminder_sent,
+          round1Questions: JSON.parse(row.round1_questions),
+          round2Questions: JSON.parse(row.round2_questions),
+          finalQuestionId: row.final_question_id,
+          normalizedAnswers,
+          createdAt: row.created_at,
+          createdByUserId: row.created_by_user_id
+        };
+      });
+    } catch (error) {
+      console.error('Error getting scheduled games for guild:', error);
       throw error;
     }
   }
