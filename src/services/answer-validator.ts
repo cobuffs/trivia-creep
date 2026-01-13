@@ -111,9 +111,40 @@ function validateAnswerWithSpec(playerInput: string, spec: AnswerSpec): boolean 
   }
 
   if (spec.answer_mode === "single") {
-    // Check against all accepted answers
-    for (const accepted of spec.accepted) {
+    // Validate that accepted array exists and is an array
+    if (!Array.isArray(spec.accepted)) {
+      console.error(`[VALIDATION ERROR] spec.accepted is not an array. Type: ${typeof spec.accepted}, Value:`, spec.accepted);
+      return false;
+    }
+    
+    if (spec.accepted.length === 0) {
+      console.error(`[VALIDATION ERROR] spec.accepted is empty array`);
+      return false;
+    }
+    
+    // Pre-calculate inputCollapsed once (it's the same for all iterations)
+    const inputCollapsed = normalizedInput.replace(/\s+/g, '');
+    
+    // Check against all accepted answers - iterate by index to ensure we check all elements
+    // Using index-based loop to avoid any potential issues with for...of iteration
+    for (let i = 0; i < spec.accepted.length; i++) {
+      const accepted = spec.accepted[i];
+      
+      // Ensure accepted is a string
+      if (typeof accepted !== 'string') {
+        console.warn(`[VALIDATION WARNING] spec.accepted[${i}] is not a string. Type: ${typeof accepted}, Value:`, accepted);
+        continue;
+      }
+      
+      // Check exact match
       if (normalizedInput === accepted) {
+        return true;
+      }
+      
+      // Also check space-collapsed versions for equivalence
+      // "we" should match "w e" and vice versa
+      const acceptedCollapsed = accepted.replace(/\s+/g, '');
+      if (inputCollapsed === acceptedCollapsed && inputCollapsed.length > 0) {
         return true;
       }
     }
@@ -169,29 +200,65 @@ export function validateAnswer(playerInput: string, correctAnswer: string, norma
   }
   
   // Fallback to original validation logic
-  // Normalize player input
-  const normalizedInput = normalizeAnswer(playerInput);
+  // Normalize player input using the same normalization as spec-based validation
+  const normalizedInput = normalizeTextForSpec(playerInput);
   
   // Empty or whitespace-only input is invalid
   if (!normalizedInput || normalizedInput.trim().length === 0) {
     return false;
   }
   
-  // Get all valid variants of the correct answer
+  // Normalize the correct answer using the same method
+  const normalizedAnswer = normalizeTextForSpec(correctAnswer);
+  
+  // Check exact match
+  if (normalizedInput === normalizedAnswer) {
+    return true;
+  }
+  
+  // Check space-collapsed versions for equivalence (e.g., "we" matches "w e")
+  const inputCollapsed = normalizedInput.replace(/\s+/g, '');
+  const answerCollapsed = normalizedAnswer.replace(/\s+/g, '');
+  if (inputCollapsed === answerCollapsed && inputCollapsed.length > 0) {
+    return true;
+  }
+  
+  // Get all valid variants of the correct answer (for parenthetical content)
+  // Note: extractParentheticalVariants uses normalizeAnswer, but we'll re-normalize with normalizeTextForSpec
   const answerVariants = extractParentheticalVariants(correctAnswer);
   
-  // Check exact match against all variants
+  // Check each variant (re-normalize to ensure consistency)
   for (const variant of answerVariants) {
-    if (normalizedInput === variant) {
+    const normalizedVariant = normalizeTextForSpec(variant);
+    
+    // Check exact match
+    if (normalizedInput === normalizedVariant) {
+      return true;
+    }
+    
+    // Check space-collapsed versions
+    const variantCollapsed = normalizedVariant.replace(/\s+/g, '');
+    if (inputCollapsed === variantCollapsed && inputCollapsed.length > 0) {
       return true;
     }
   }
   
-  // Check with common variations
+  // Check with common variations (hyphens, &/and, etc.)
   const inputVariations = generateVariations(normalizedInput);
   for (const variant of answerVariants) {
+    const normalizedVariant = normalizeTextForSpec(variant);
     for (const inputVar of inputVariations) {
-      if (inputVar === variant) {
+      // Normalize variation to ensure consistency
+      const normalizedVar = normalizeTextForSpec(inputVar);
+      
+      if (normalizedVar === normalizedVariant) {
+        return true;
+      }
+      
+      // Check space-collapsed versions
+      const varCollapsed = normalizedVar.replace(/\s+/g, '');
+      const variantCollapsed = normalizedVariant.replace(/\s+/g, '');
+      if (varCollapsed === variantCollapsed && varCollapsed.length > 0) {
         return true;
       }
     }

@@ -562,6 +562,12 @@ export class DatabaseService {
       for (const row of result.recordset) {
         try {
           const spec = JSON.parse(row.spec_json);
+          // Log spec structure for debugging (especially accepted array)
+          if (spec.accepted && Array.isArray(spec.accepted)) {
+            console.log(`[DB] Loaded spec for question_id=${row.question_id}, accepted array length=${spec.accepted.length}, values:`, JSON.stringify(spec.accepted));
+          } else {
+            console.warn(`[DB] Loaded spec for question_id=${row.question_id}, accepted is not an array:`, typeof spec.accepted, spec.accepted);
+          }
           specs.set(row.question_id, spec);
         } catch (error) {
           console.error(`Error parsing spec_json for question_id ${row.question_id}:`, error);

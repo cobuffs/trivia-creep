@@ -3,12 +3,13 @@ import { DatabaseService, ScheduledGame } from './database';
 import { GameManager } from './game-manager';
 import { Question } from '../../helper-scripts/types';
 import { logger } from '../utils/logger';
-import { createInfoEmbed } from '../utils/formatters';
+import { createInfoEmbed, createRulesEmbed } from '../utils/formatters';
 import { formatDateTime } from '../utils/datetime-parser';
 
 interface ScheduledGameTimer {
   scheduledGame: ScheduledGame;
   reminderTimer?: NodeJS.Timeout;
+  welcomeTimer?: NodeJS.Timeout;
   startTimer?: NodeJS.Timeout;
 }
 
@@ -87,6 +88,18 @@ export class SchedulerService {
       logger.debug(`Scheduled reminder for game ${scheduledGame.scheduledGameId} in ${Math.round(reminderDelay / 1000)} seconds`);
     }
 
+    // Set up welcome message timer (60 seconds before start)
+    const welcomeTime = startTime - (60 * 1000); // 60 seconds before
+    if (welcomeTime > nowTime) {
+      const welcomeDelay = welcomeTime - nowTime;
+      timer.welcomeTimer = setTimeout(() => {
+        this.sendWelcomeMessage(scheduledGame).catch(error => {
+          logger.error(`Error sending welcome message for scheduled game ${scheduledGame.scheduledGameId}:`, error);
+        });
+      }, welcomeDelay);
+      logger.debug(`Scheduled welcome message for game ${scheduledGame.scheduledGameId} in ${Math.round(welcomeDelay / 1000)} seconds`);
+    }
+
     // Set up start timer if it hasn't passed
     if (startTime > nowTime) {
       const startDelay = startTime - nowTime;
@@ -117,6 +130,9 @@ export class SchedulerService {
     if (timer) {
       if (timer.reminderTimer) {
         clearTimeout(timer.reminderTimer);
+      }
+      if (timer.welcomeTimer) {
+        clearTimeout(timer.welcomeTimer);
       }
       if (timer.startTimer) {
         clearTimeout(timer.startTimer);
@@ -253,18 +269,11 @@ export class SchedulerService {
 
     const textChannel = channel as TextChannel;
 
-    // Get the thread
-    let thread: ThreadChannel | null = null;
-    try {
-      thread = await textChannel.threads.fetch(scheduledGame.threadId);
-    } catch (error) {
-      logger.warn(`Could not fetch thread ${scheduledGame.threadId} for reminder:`, error);
-    }
-
     const formattedTime = formatDateTime(scheduledGame.scheduledStartTime);
+    const threadLink = `https://discord.com/channels/${scheduledGame.guildId}/${scheduledGame.threadId}`;
     const embed = createInfoEmbed(
       '⏰ Trivia Game Reminder',
-      `Trivia game starting in **15 minutes**!\n\n**Start time:** ${formattedTime}\n\nJoin the thread to participate!`
+      `Trivia game starting in **15 minutes**!\n\n**Start time:** ${formattedTime}\n\n**Join the thread:** ${threadLink}`
     );
 
     // Find and mention the trivia-nerds role
@@ -277,12 +286,56 @@ export class SchedulerService {
       embeds: [embed] 
     });
 
-    // Also post to thread if it exists
-    if (thread) {
-      await thread.send({ embeds: [embed] });
+    logger.info(`Sent reminder for scheduled game ${scheduledGame.scheduledGameId}`);
+  }
+
+  /**
+   * Send welcome message 60 seconds before the game starts
+   */
+  private async sendWelcomeMessage(scheduledGame: ScheduledGame): Promise<void> {
+    if (!this.client) {
+      throw new Error('Client not initialized');
     }
 
-    logger.info(`Sent reminder for scheduled game ${scheduledGame.scheduledGameId}`);
+    // Get the guild and channel
+    const guild = await this.client.guilds.fetch(scheduledGame.guildId);
+    if (!guild) {
+      throw new Error(`Guild ${scheduledGame.guildId} not found`);
+    }
+
+    const channel = await guild.channels.fetch(scheduledGame.channelId);
+    if (!channel || channel.type !== 0) {
+      throw new Error(`Channel ${scheduledGame.channelId} not found or is not a text channel`);
+    }
+
+    const textChannel = channel as TextChannel;
+
+    // Get the thread
+    let thread: ThreadChannel | null = null;
+    try {
+      thread = await textChannel.threads.fetch(scheduledGame.threadId);
+    } catch (error) {
+      logger.error(`Thread ${scheduledGame.threadId} not found for scheduled game ${scheduledGame.scheduledGameId}`);
+      throw new Error(`Thread ${scheduledGame.threadId} not found`);
+    }
+
+    if (!thread) {
+      throw new Error(`Thread ${scheduledGame.threadId} not found`);
+    }
+
+    const threadLink = `https://discord.com/channels/${scheduledGame.guildId}/${scheduledGame.threadId}`;
+    
+    // Find and mention the trivia-nerds role
+    const triviaNerdsRole = textChannel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
+    const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
+    
+    // Post welcome message to main channel (with "We'll begin in 60 seconds!")
+    await textChannel.send({ 
+      content: roleMention ? `${roleMention} Scheduled trivia is starting soon!` : undefined,
+      embeds: [createRulesEmbed(threadLink)]
+    });
+
+    logger.info(`Sent welcome message for scheduled game ${scheduledGame.scheduledGameId}`);
   }
 
   /**

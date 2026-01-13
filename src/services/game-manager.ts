@@ -275,19 +275,8 @@ export class GameManager {
       logger.debug(`[SCHEDULED GAME START DEBUG] Round 2 Question IDs loaded: ${JSON.stringify(round2Ids)}`);
       logger.debug(`[SCHEDULED GAME START DEBUG] Final Question ID loaded: ${finalId}`);
 
-      // Post game rules to thread (no 60-second wait for scheduled games)
-      const threadLink = `https://discord.com/channels/${guildId}/${thread.id}`;
-      
-      // Find and mention the trivia-nerds role
-      const triviaNerdsRole = channel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
-      const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
-      
-      await channel.send({ 
-        content: roleMention ? `${roleMention} Scheduled trivia is starting now!` : undefined,
-        embeds: [createRulesEmbed(threadLink)]
-      });
-
-      // Post to thread as well
+      // Note: Welcome message was already posted 60 seconds before by the scheduler
+      // Just post a brief message to thread that game is starting
       await thread.send({
         embeds: [createInfoEmbed(
           '🎮 Game Starting',
@@ -295,7 +284,7 @@ export class GameManager {
         )]
       });
 
-      // Start Round 1 immediately (no wait for scheduled games)
+      // Start Round 1 immediately (welcome message was already posted 60 seconds ago)
       this.gameState.status = 'ROUND_1';
       await this.startQuestion(0, 'round1');
 
@@ -501,8 +490,31 @@ export class GameManager {
     // Get normalized answer spec if available
     const normalizedSpec = question.id ? this.gameState.normalizedAnswers.get(question.id) : undefined;
     
+    // Log validation details for debugging
+    if (question.id) {
+      if (normalizedSpec) {
+        // Log detailed spec information including array length and all values
+        const acceptedInfo = normalizedSpec.accepted 
+          ? `length=${normalizedSpec.accepted.length}, values=${JSON.stringify(normalizedSpec.accepted)}`
+          : 'MISSING';
+        logger.debug(`[VALIDATION] question_id=${question.id}, using spec with accepted: ${acceptedInfo}, player input: "${message.content}"`);
+        
+        // Additional validation: check if accepted is actually an array
+        if (!Array.isArray(normalizedSpec.accepted)) {
+          logger.error(`[VALIDATION ERROR] question_id=${question.id}, spec.accepted is not an array! Type: ${typeof normalizedSpec.accepted}, Value:`, normalizedSpec.accepted);
+        }
+      } else {
+        logger.debug(`[VALIDATION] Using fallback validation for question_id=${question.id} (spec not yet loaded). Answer: "${question.answer}", Player input: "${message.content}"`);
+      }
+    }
+    
     // Validate answer (use normalized spec if available, otherwise fallback)
     const isCorrect = validateAnswer(message.content, question.answer, normalizedSpec);
+    
+    // Log result for debugging
+    if (question.id && !isCorrect) {
+      logger.debug(`[VALIDATION] question_id=${question.id}, answer REJECTED. Input: "${message.content}", Spec: ${normalizedSpec ? JSON.stringify(normalizedSpec.accepted) : 'none'}`);
+    }
 
     if (isCorrect) {
       // Double-check time hasn't expired while we were validating (race condition protection)
