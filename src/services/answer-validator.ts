@@ -163,24 +163,40 @@ function validateAnswerWithSpec(playerInput: string, spec: AnswerSpec): boolean 
     return false;
   } else if (spec.answer_mode === "n_of_m") {
     // For n_of_m, we need to check if the player provided the required number of options
-    const inputTokens = normalizedInput.split(/\s+/).filter(Boolean);
+    // Options can be multi-word (e.g., "candlestick maker"), so we check if the option
+    // appears anywhere in the normalized input string, not just as a single token
     const matchedOptions = new Set<string>();
     
-    // Check each input token against options and aliases
-    for (const token of inputTokens) {
-      for (const option of spec.options) {
-        if (token === option) {
+    // Helper to check if a phrase appears in the input (word boundary aware)
+    const phraseInInput = (phrase: string): boolean => {
+      // Create a regex that matches the phrase with word boundaries
+      // This handles multi-word phrases like "candlestick maker"
+      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escapedPhrase}\\b`, 'i');
+      return regex.test(normalizedInput);
+    };
+    
+    // Check each option against the input
+    for (const option of spec.options) {
+      // Check if the option itself appears in the input
+      if (phraseInInput(option)) {
+        matchedOptions.add(option);
+        console.log(`[VALIDATE n_of_m] Matched option: "${option}" in input "${normalizedInput}"`);
+        continue; // Move to next option
+      }
+      
+      // Check aliases
+      const aliases = spec.option_aliases[option] || [];
+      for (const alias of aliases) {
+        if (phraseInInput(alias)) {
           matchedOptions.add(option);
-        }
-        // Check aliases
-        const aliases = spec.option_aliases[option] || [];
-        for (const alias of aliases) {
-          if (token === alias) {
-            matchedOptions.add(option);
-          }
+          console.log(`[VALIDATE n_of_m] Matched alias: "${alias}" for option "${option}" in input "${normalizedInput}"`);
+          break; // Found a match, move to next option
         }
       }
     }
+    
+    console.log(`[VALIDATE n_of_m] Matched ${matchedOptions.size} of ${spec.required_count} required. Options: [${Array.from(matchedOptions).join(', ')}]`);
     
     // Check if we have the required count
     if (matchedOptions.size >= spec.required_count) {

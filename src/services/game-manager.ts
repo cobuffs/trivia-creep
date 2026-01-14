@@ -560,16 +560,18 @@ export class GameManager {
     // Log validation details for debugging
     if (question.id) {
       if (normalizedSpec) {
-        // Log detailed spec information including array length and all values
-        const acceptedInfo = normalizedSpec.accepted 
-          ? `length=${normalizedSpec.accepted.length}, values=${JSON.stringify(normalizedSpec.accepted)}`
-          : 'MISSING';
-        logger.debug(`[VALIDATION] question_id=${question.id}, using spec with accepted: ${acceptedInfo}, player input: "${message.content}"`);
-        
-        // Additional validation: check if accepted is actually an array
-        if (!Array.isArray(normalizedSpec.accepted)) {
-          logger.error(`[VALIDATION ERROR] question_id=${question.id}, spec.accepted is not an array! Type: ${typeof normalizedSpec.accepted}, Value:`, normalizedSpec.accepted);
+        // Log detailed spec information based on answer mode
+        let specInfo: string;
+        if (normalizedSpec.answer_mode === 'n_of_m') {
+          specInfo = `mode=n_of_m, required=${normalizedSpec.required_count}, options=${JSON.stringify(normalizedSpec.options)}`;
+        } else {
+          specInfo = `mode=single, accepted: length=${normalizedSpec.accepted?.length ?? 0}, values=${JSON.stringify(normalizedSpec.accepted)}`;
+          // Additional validation: check if accepted is actually an array for single mode
+          if (!Array.isArray(normalizedSpec.accepted)) {
+            logger.error(`[VALIDATION ERROR] question_id=${question.id}, spec.accepted is not an array! Type: ${typeof normalizedSpec.accepted}, Value:`, normalizedSpec.accepted);
+          }
         }
+        logger.debug(`[VALIDATION] question_id=${question.id}, ${specInfo}, player input: "${message.content}"`);
       } else {
         logger.debug(`[VALIDATION] Using fallback validation for question_id=${question.id} (spec not yet loaded). Answer: "${question.answer}", Player input: "${message.content}"`);
       }
@@ -580,7 +582,12 @@ export class GameManager {
     
     // Log result for debugging
     if (question.id && !isCorrect) {
-      logger.debug(`[VALIDATION] question_id=${question.id}, answer REJECTED. Input: "${message.content}", Spec: ${normalizedSpec ? JSON.stringify(normalizedSpec.accepted) : 'none'}`);
+      const specSummary = normalizedSpec 
+        ? (normalizedSpec.answer_mode === 'n_of_m' 
+            ? `options: ${JSON.stringify(normalizedSpec.options)}` 
+            : JSON.stringify(normalizedSpec.accepted))
+        : 'none';
+      logger.debug(`[VALIDATION] question_id=${question.id}, answer REJECTED. Input: "${message.content}", Spec: ${specSummary}`);
     }
 
     if (isCorrect) {
