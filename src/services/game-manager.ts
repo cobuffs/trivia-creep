@@ -865,31 +865,36 @@ export class GameManager {
         embeds: [leaderboardEmbed],
         flags: MessageFlags.SuppressNotifications
       });
+    }
 
-      // Post monthly leaderboard snapshot (suppress notifications)
+    // Archive game
+    const channel = this.gameState.channel; // Store channel reference before archiving
+    const playersCount = this.gameState.players.size; // Store player count to check if game will be archived
+    await this.archiveGame();
+
+    // Post monthly leaderboard snapshot after archiving (so current game is included)
+    // Only post if game was actually archived (more than 1 player participated)
+    if (playersCount > 1 && channel) {
       try {
         const monthlyLeaderboard = await this.databaseService.getLeaderboard('month', 10);
         if (monthlyLeaderboard.length > 0) {
           const monthlyEmbed = createHistoricalLeaderboardEmbed(monthlyLeaderboard, 'month');
-          await this.gameState.channel.send({
+          await channel.send({
             embeds: [monthlyEmbed],
             flags: MessageFlags.SuppressNotifications
           });
         }
 
         // Post message about /leaderboard command
-        await this.gameState.channel.send({
+        await channel.send({
           content: '💡 Use `/leaderboard` to view all-time, monthly, or yearly leaderboards!',
           flags: MessageFlags.SuppressNotifications
         });
       } catch (error) {
         logger.error('Error posting monthly leaderboard snapshot:', error);
-        // Don't throw - continue with archiving even if monthly leaderboard fails
+        // Don't throw - game is already archived
       }
     }
-
-    // Archive game
-    await this.archiveGame();
   }
 
   /**
@@ -1026,31 +1031,12 @@ export class GameManager {
         embeds: [channelEmbed],
         flags: MessageFlags.SuppressNotifications
       });
-
-      // Post monthly leaderboard snapshot (suppress notifications)
-      try {
-        const monthlyLeaderboard = await this.databaseService.getLeaderboard('month', 10);
-        if (monthlyLeaderboard.length > 0) {
-          const monthlyEmbed = createHistoricalLeaderboardEmbed(monthlyLeaderboard, 'month');
-          await this.gameState.channel.send({
-            embeds: [monthlyEmbed],
-            flags: MessageFlags.SuppressNotifications
-          });
-        }
-
-        // Post message about /leaderboard command
-        await this.gameState.channel.send({
-          content: '💡 Use `/leaderboard` to view all-time, monthly, or yearly leaderboards!',
-          flags: MessageFlags.SuppressNotifications
-        });
-      } catch (error) {
-        logger.error('Error posting monthly leaderboard snapshot:', error);
-        // Don't throw - continue with archiving even if monthly leaderboard fails
-      }
     }
 
     // Archive with 'abandoned' status
     this.gameState.status = 'ARCHIVING';
+    let gameArchived = false;
+    const channel = this.gameState.channel; // Store channel reference before clearing state
     try {
       const round1QuestionIds = this.gameState.questions.round1
         .map(q => q.id)
@@ -1091,6 +1077,7 @@ export class GameManager {
           finalQuestionId,
           players
         );
+        gameArchived = true;
       } else {
         logger.info(`Game ${this.gameState.gameId} not archived - only 1 player participated`);
       }
@@ -1104,6 +1091,30 @@ export class GameManager {
       }
       this.clearAllTimers();
       this.gameState = null;
+    }
+
+    // Post monthly leaderboard snapshot after archiving (so current game is included)
+    // Only post if game was actually archived
+    if (gameArchived && channel) {
+      try {
+        const monthlyLeaderboard = await this.databaseService.getLeaderboard('month', 10);
+        if (monthlyLeaderboard.length > 0) {
+          const monthlyEmbed = createHistoricalLeaderboardEmbed(monthlyLeaderboard, 'month');
+          await channel.send({
+            embeds: [monthlyEmbed],
+            flags: MessageFlags.SuppressNotifications
+          });
+        }
+
+        // Post message about /leaderboard command
+        await channel.send({
+          content: '💡 Use `/leaderboard` to view all-time, monthly, or yearly leaderboards!',
+          flags: MessageFlags.SuppressNotifications
+        });
+      } catch (error) {
+        logger.error('Error posting monthly leaderboard snapshot:', error);
+        // Don't throw - game is already archived
+      }
     }
   }
 
