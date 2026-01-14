@@ -106,7 +106,11 @@ function normalizeTextForSpec(input: string): string {
 function validateAnswerWithSpec(playerInput: string, spec: AnswerSpec): boolean {
   const normalizedInput = normalizeTextForSpec(playerInput);
   
+  // Log the normalized input for debugging
+  console.log(`[VALIDATE] Raw input: "${playerInput}" -> Normalized: "${normalizedInput}"`);
+  
   if (!normalizedInput || normalizedInput.trim().length === 0) {
+    console.log(`[VALIDATE] REJECTED: Empty after normalization`);
     return false;
   }
 
@@ -124,6 +128,7 @@ function validateAnswerWithSpec(playerInput: string, spec: AnswerSpec): boolean 
     
     // Pre-calculate inputCollapsed once (it's the same for all iterations)
     const inputCollapsed = normalizedInput.replace(/\s+/g, '');
+    console.log(`[VALIDATE] Input collapsed (no spaces): "${inputCollapsed}"`);
     
     // Check against all accepted answers - iterate by index to ensure we check all elements
     // Using index-based loop to avoid any potential issues with for...of iteration
@@ -136,18 +141,25 @@ function validateAnswerWithSpec(playerInput: string, spec: AnswerSpec): boolean 
         continue;
       }
       
+      const acceptedCollapsed = accepted.replace(/\s+/g, '');
+      
+      // Log each comparison for debugging
+      console.log(`[VALIDATE] Comparing: input="${normalizedInput}" vs accepted[${i}]="${accepted}" | collapsed: "${inputCollapsed}" vs "${acceptedCollapsed}"`);
+      
       // Check exact match
       if (normalizedInput === accepted) {
+        console.log(`[VALIDATE] MATCH (exact): "${normalizedInput}" === "${accepted}"`);
         return true;
       }
       
       // Also check space-collapsed versions for equivalence
       // "we" should match "w e" and vice versa
-      const acceptedCollapsed = accepted.replace(/\s+/g, '');
       if (inputCollapsed === acceptedCollapsed && inputCollapsed.length > 0) {
+        console.log(`[VALIDATE] MATCH (collapsed): "${inputCollapsed}" === "${acceptedCollapsed}"`);
         return true;
       }
     }
+    console.log(`[VALIDATE] NO MATCH found in ${spec.accepted.length} accepted values`);
     return false;
   } else if (spec.answer_mode === "n_of_m") {
     // For n_of_m, we need to check if the player provided the required number of options

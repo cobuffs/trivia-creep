@@ -245,6 +245,25 @@ export class GameManager {
 
     logger.info(`Starting scheduled trivia game for guild ${guildId}`);
 
+    // Collect all question IDs
+    const allQuestionIds = [
+      ...round1Questions.map(q => q.id).filter((id): id is number => id !== undefined),
+      ...round2Questions.map(q => q.id).filter((id): id is number => id !== undefined),
+      ...(finalQuestion?.id ? [finalQuestion.id] : [])
+    ];
+
+    // Load existing normalized answers from database (most up-to-date source)
+    const existingSpecs = await this.databaseService.getAnswerSpecs(allQuestionIds);
+    
+    // Merge: start with passed-in normalizedAnswers, then override with database specs (database is source of truth)
+    const mergedNormalizedAnswers = new Map<number, AnswerSpec>(normalizedAnswers);
+    for (const [questionId, spec] of existingSpecs) {
+      mergedNormalizedAnswers.set(questionId, spec);
+    }
+    
+    logger.info(`Loaded ${existingSpecs.size} existing normalized answers from database for scheduled game`);
+    logger.info(`Total normalized answers available: ${mergedNormalizedAnswers.size} out of ${allQuestionIds.length} questions`);
+
     // Set status to STARTING
     this.gameState = {
       gameId: `game_${Date.now()}`,
@@ -260,7 +279,7 @@ export class GameManager {
         round2: round2Questions,
         final: finalQuestion
       },
-      normalizedAnswers,
+      normalizedAnswers: mergedNormalizedAnswers,
       players: new Map(),
       startTime: new Date(),
       questionAnswered: false,
@@ -429,22 +448,28 @@ export class GameManager {
       questionIndex,
       question.category || 'Unknown',
       question.dollar_amount || 0,
-      question.question
+      question.question,
+      question.air_date
     );
 
-    const questionMessage = await this.gameState.thread.send({ 
+    await this.gameState.thread.send({ 
       embeds: [embed],
       flags: MessageFlags.SuppressNotifications
     });
 
     // Set timing AFTER the question is visible to players
-    // Use the message timestamp for accuracy so the 30s window aligns with when users see the question
-    this.gameState.currentQuestionStartTime = questionMessage.createdAt;
-    this.gameState.currentQuestionEndTime = new Date(questionMessage.createdAt.getTime() + 30000);
+    // Use local time for consistency with setTimeout (avoids clock skew issues with Discord's server timestamps)
+    const questionStartTime = new Date();
+    this.gameState.currentQuestionStartTime = questionStartTime;
+    this.gameState.currentQuestionEndTime = new Date(questionStartTime.getTime() + 30000);
 
     // Start 30-second timer
     this.gameState.timers.questionTimer = setTimeout(async () => {
-      await this.handleQuestionTimeout(question);
+      try {
+        await this.handleQuestionTimeout(question);
+      } catch (error) {
+        logger.error('Error in question timeout handler:', error);
+      }
     }, 30000);
   }
 
@@ -470,6 +495,7 @@ export class GameManager {
    */
   private async processMessage(message: Message): Promise<void> {
     if (!this.gameState || this.gameState.status !== 'ROUND_1' && this.gameState.status !== 'ROUND_2') {
+      logger.debug(`[PROCESS] SKIP: Game not active or wrong status. Status: ${this.gameState?.status}`);
       return;
     }
 
@@ -478,11 +504,11 @@ export class GameManager {
     const isThread = this.gameState.thread && message.channel.id === this.gameState.thread.id;
     
     if (!isMainChannel && !isThread) {
-      return;
+      return; // Silent skip for messages in other channels
     }
 
     if (message.author.bot) {
-      return;
+      return; // Silent skip for bot messages
     }
 
     // Mark player as participated
@@ -490,12 +516,16 @@ export class GameManager {
 
     // Check if question already answered (atomic check)
     if (this.gameState.questionAnswered) {
+      logger.debug(`[PROCESS] SKIP: Question already answered. User: ${message.author.username}, Input: "${message.content}"`);
       return;
     }
 
     // Check if time has expired - reject answers that come in after the timeout
+    // Add 500ms buffer to account for network latency between message timestamp and setTimeout
     const now = new Date();
-    if (this.gameState.currentQuestionEndTime && now > this.gameState.currentQuestionEndTime) {
+    const bufferMs = 500;
+    if (this.gameState.currentQuestionEndTime && now.getTime() > this.gameState.currentQuestionEndTime.getTime() + bufferMs) {
+      logger.debug(`[PROCESS] SKIP: Time expired. Now: ${now.toISOString()}, EndTime: ${this.gameState.currentQuestionEndTime.toISOString()}, User: ${message.author.username}, Input: "${message.content}"`);
       return;
     }
 
@@ -513,7 +543,10 @@ export class GameManager {
     // completes before the game starts, the spec should be stable. However,
     // we still want to ensure we're working with the spec as it exists at
     // validation time, so we capture it before validation.
-    const normalizedSpec = question.id ? this.gameState.normalizedAnswers.get(question.id) : undefined;
+    // Use typeof check instead of truthiness to handle question.id === 0
+    const normalizedSpec = typeof question.id === 'number' 
+      ? this.gameState.normalizedAnswers.get(question.id) 
+      : undefined;
     
     // Log validation details for debugging
     if (question.id) {
@@ -543,8 +576,11 @@ export class GameManager {
 
     if (isCorrect) {
       // Double-check time hasn't expired while we were validating (race condition protection)
+      // Use same buffer as initial check for consistency
       const checkTime = new Date();
-      if (this.gameState.currentQuestionEndTime && checkTime > this.gameState.currentQuestionEndTime) {
+      const bufferMs = 500;
+      if (this.gameState.currentQuestionEndTime && checkTime.getTime() > this.gameState.currentQuestionEndTime.getTime() + bufferMs) {
+        logger.debug(`[PROCESS] SKIP: Correct answer but time expired during validation. User: ${message.author.username}, Input: "${message.content}"`);
         return;
       }
 
@@ -686,7 +722,8 @@ export class GameManager {
     const leaderboard = this.getCurrentLeaderboard();
     const embed = createFinalJeopardyCategoryEmbed(
       this.gameState.questions.final.category || 'Unknown',
-      leaderboard
+      leaderboard,
+      this.gameState.questions.final.air_date
     );
 
     await this.gameState.thread.send({ 
@@ -713,7 +750,8 @@ export class GameManager {
 
     const embed = createFinalJeopardyQuestionEmbed(
       this.gameState.questions.final.category || 'Unknown',
-      this.gameState.questions.final.question
+      this.gameState.questions.final.question,
+      this.gameState.questions.final.air_date
     );
 
     await this.gameState.thread.send({ 
@@ -1128,15 +1166,38 @@ export class GameManager {
    * Schedule thread deletion 5 minutes after game ends
    */
   private scheduleThreadDeletion(thread: ThreadChannel): void {
+    // Capture thread ID and parent channel - we'll fetch fresh when deleting
+    // because the thread object may become stale after 5 minutes
+    const threadId = thread.id;
+    const parentChannel = thread.parent;
+    
+    logger.info(`Scheduling thread ${threadId} for deletion in 5 minutes`);
+    
     // Schedule deletion in 5 minutes (300000 ms)
-    // Note: Timer is not stored in gameState since gameState will be cleared
-    // The closure keeps a reference to the thread, which is sufficient
     setTimeout(async () => {
       try {
-        await thread.delete('Trivia game completed - auto-cleanup');
-        logger.info(`Thread ${thread.id} deleted successfully after game completion`);
+        // Fetch the thread fresh to ensure we have a valid reference
+        // The original thread object may be stale after 5 minutes
+        let threadToDelete: ThreadChannel | null = null;
+        
+        if (parentChannel) {
+          try {
+            threadToDelete = await parentChannel.threads.fetch(threadId) as ThreadChannel | null;
+          } catch (fetchError) {
+            // Thread might already be deleted or archived
+            logger.debug(`Could not fetch thread ${threadId} from parent channel: ${fetchError}`);
+          }
+        }
+        
+        // If we couldn't fetch from parent, try using the original reference as fallback
+        if (!threadToDelete) {
+          threadToDelete = thread;
+        }
+        
+        await threadToDelete.delete('Trivia game completed - auto-cleanup');
+        logger.info(`Thread ${threadId} deleted successfully after game completion`);
       } catch (error) {
-        logger.error(`Failed to delete thread ${thread.id}:`, error);
+        logger.error(`Failed to delete thread ${threadId}:`, error);
         // Thread might have already been deleted or bot lacks permissions
       }
     }, 300000); // 5 minutes

@@ -11,6 +11,7 @@ export interface Question {
   season?: string | null;            // Optional: season identifier
   clue_order?: number | null;         // Optional: order within round
   metadata?: string | null;          // Optional: JSON string for extra data
+  air_date?: string | null;          // Optional: original air date (YYYY-MM-DD format)
 }
 
 // J-Archive specific types

@@ -69,6 +69,18 @@ export function createRulesEmbed(threadLink?: string, scheduledStartTime?: Date)
 }
 
 /**
+ * Format air date for display (e.g., "2025-12-18" -> "December 18, 2025")
+ */
+function formatAirDate(airDate: string): string {
+  const date = new Date(airDate + 'T00:00:00'); // Add time to avoid timezone issues
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+}
+
+/**
  * Create embed for question display
  */
 export function createQuestionEmbed(
@@ -76,18 +88,23 @@ export function createQuestionEmbed(
   questionIndex: number,
   category: string,
   dollarAmount: number,
-  question: string
+  question: string,
+  airDate?: string | null
 ): EmbedBuilder {
   const roundName = round === 1 ? 'Round 1' : 'Round 2';
   const questionNum = questionIndex + 1;
 
+  let description = `**Category:** ${category}\n**Value:** ${formatCurrency(dollarAmount)}`;
+  
+  if (airDate) {
+    description += `\n**Originally Aired:** ${formatAirDate(airDate)}`;
+  }
+  
+  description += `\n\n${question}`;
+
   return new EmbedBuilder()
     .setTitle(`${roundName} - Question ${questionNum} of 10`)
-    .addFields(
-      { name: 'Category', value: category, inline: true },
-      { name: 'Value', value: formatCurrency(dollarAmount), inline: true }
-    )
-    .setDescription(question)
+    .setDescription(description)
     .setFooter({ text: '⏱️ 30 seconds to answer' })
     .setColor(0x9B59B6)
     .setTimestamp();
@@ -170,17 +187,26 @@ export function createRoundBreakEmbed(
  */
 export function createFinalJeopardyCategoryEmbed(
   category: string,
-  leaderboard: Array<{ username: string; score: number }>
+  leaderboard: Array<{ username: string; score: number }>,
+  airDate?: string | null
 ): EmbedBuilder {
+  const fields: Array<{ name: string; value: string; inline: boolean }> = [
+    { name: 'Category', value: category, inline: false }
+  ];
+  
+  if (airDate) {
+    fields.push({ name: 'Originally Aired', value: formatAirDate(airDate), inline: false });
+  }
+  
+  fields.push({
+    name: '📊 Current Leaderboard:',
+    value: formatLeaderboard(leaderboard),
+    inline: false
+  });
+
   return new EmbedBuilder()
     .setTitle('🎯 FINAL JEOPARDY')
-    .addFields(
-      { name: 'Category', value: category, inline: false },
-      {
-        name: '📊 Current Leaderboard:',
-        value: formatLeaderboard(leaderboard)
-      }
-    )
+    .addFields(fields)
     .setDescription('💰 You have 30 seconds to place your wager using `/final-wager`')
     .setColor(0xFFD700)
     .setTimestamp();
@@ -189,10 +215,22 @@ export function createFinalJeopardyCategoryEmbed(
 /**
  * Create embed for Final Jeopardy question
  */
-export function createFinalJeopardyQuestionEmbed(category: string, question: string): EmbedBuilder {
+export function createFinalJeopardyQuestionEmbed(
+  category: string, 
+  question: string,
+  airDate?: string | null
+): EmbedBuilder {
+  const fields: Array<{ name: string; value: string; inline: boolean }> = [
+    { name: 'Category', value: category, inline: false }
+  ];
+  
+  if (airDate) {
+    fields.push({ name: 'Originally Aired', value: formatAirDate(airDate), inline: false });
+  }
+
   return new EmbedBuilder()
     .setTitle('🎯 FINAL JEOPARDY')
-    .addFields({ name: 'Category', value: category, inline: false })
+    .addFields(fields)
     .setDescription(question)
     .setFooter({ text: 'Submit your answer using /final-guess\nYou have 30 seconds.' })
     .setColor(0xFFD700)

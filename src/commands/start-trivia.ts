@@ -606,13 +606,19 @@ export async function handleStartNowButton(
  */
 export function createScheduleTriviaModal(): ModalBuilder {
   const now = new Date();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  // Default to 1 hour from now in local timezone
+  const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
   
-  // Format: YYYY-MM-DD
-  const defaultDate = tomorrow.toISOString().split('T')[0];
-  // Format: HH:MM (24-hour)
-  const defaultTime = '20:00';
+  // Format: YYYY-MM-DD (local timezone)
+  const year = oneHourFromNow.getFullYear();
+  const month = String(oneHourFromNow.getMonth() + 1).padStart(2, '0');
+  const day = String(oneHourFromNow.getDate()).padStart(2, '0');
+  const defaultDate = `${year}-${month}-${day}`;
+  
+  // Format: HH:MM (24-hour, local timezone)
+  const hours = String(oneHourFromNow.getHours()).padStart(2, '0');
+  const minutes = String(oneHourFromNow.getMinutes()).padStart(2, '0');
+  const defaultTime = `${hours}:${minutes}`;
 
   // Calculate max date (365 days from now)
   const maxDate = new Date(now);

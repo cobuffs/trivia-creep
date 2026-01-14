@@ -13,6 +13,7 @@
 - `season` (optional) - Season identifier
 - `clue_order` (optional) - Order within round
 - `metadata` (optional) - JSON string for additional data
+- `air_date` (optional) - Original air date of the episode (DATE, format: YYYY-MM-DD)
 
 ## New Tables to Create
 

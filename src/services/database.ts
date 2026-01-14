@@ -212,7 +212,7 @@ export class DatabaseService {
           SELECT TOP (@count) 
             [id], [source], [question], [answer], [category], 
             [dollar_amount], [round], [game_id], [season], 
-            [clue_order], [metadata]
+            [clue_order], [metadata], [air_date]
           FROM [dbo].[questions]
           WHERE [round] = @round
           ORDER BY NEWID()
@@ -229,7 +229,8 @@ export class DatabaseService {
         game_id: row.game_id,
         season: row.season,
         clue_order: row.clue_order,
-        metadata: row.metadata
+        metadata: row.metadata,
+        air_date: row.air_date ? row.air_date.toISOString().split('T')[0] : null
       }));
     } catch (error) {
       console.error('Error getting random questions:', error);
@@ -249,7 +250,7 @@ export class DatabaseService {
         .query(`
           SELECT [id], [source], [question], [answer], [category], 
             [dollar_amount], [round], [game_id], [season], 
-            [clue_order], [metadata]
+            [clue_order], [metadata], [air_date]
           FROM [dbo].[questions]
           WHERE [id] = @id
         `);
@@ -270,7 +271,8 @@ export class DatabaseService {
         game_id: row.game_id,
         season: row.season,
         clue_order: row.clue_order,
-        metadata: row.metadata
+        metadata: row.metadata,
+        air_date: row.air_date ? row.air_date.toISOString().split('T')[0] : null
       };
     } catch (error) {
       console.error('Error getting question by ID:', error);
