@@ -73,6 +73,7 @@ export interface GameState {
     wageringTimer?: NodeJS.Timeout;
     answeringTimer?: NodeJS.Timeout;
     threadDeletionTimer?: NodeJS.Timeout;
+    nextQuestionTimer?: NodeJS.Timeout;
   };
 }
 
@@ -419,7 +420,14 @@ export class GameManager {
       return;
     }
 
-    const questions = round === 'round1' ? this.gameState.questions.round1 : this.gameState.questions.round2;
+    // Store references to prevent race conditions
+    const gameState = this.gameState;
+    const thread = gameState.thread;
+    if (!thread) {
+      return;
+    }
+
+    const questions = round === 'round1' ? gameState.questions.round1 : gameState.questions.round2;
     const question = questions[questionIndex];
 
     if (!question) {
@@ -427,14 +435,14 @@ export class GameManager {
       return;
     }
 
-    this.gameState.currentQuestionIndex = questionIndex;
-    this.gameState.currentRound = round;
-    this.gameState.questionAnswered = false;
+    gameState.currentQuestionIndex = questionIndex;
+    gameState.currentRound = round;
+    gameState.questionAnswered = false;
 
     // Show leaderboard if players exist (except for first question)
-    if (this.gameState.players.size > 0 && (questionIndex > 0 || round === 'round2')) {
+    if (gameState.players.size > 0 && (questionIndex > 0 || round === 'round2')) {
       const leaderboard = this.getCurrentLeaderboard();
-      await this.gameState.thread.send({ 
+      await thread.send({ 
         embeds: [createLeaderboardEmbed(leaderboard)],
         flags: MessageFlags.SuppressNotifications
       });
@@ -453,7 +461,7 @@ export class GameManager {
       question.air_date
     );
 
-    await this.gameState.thread.send({ 
+    await thread.send({ 
       embeds: [embed],
       flags: MessageFlags.SuppressNotifications
     });
@@ -461,11 +469,11 @@ export class GameManager {
     // Set timing AFTER the question is visible to players
     // Use local time for consistency with setTimeout (avoids clock skew issues with Discord's server timestamps)
     const questionStartTime = new Date();
-    this.gameState.currentQuestionStartTime = questionStartTime;
-    this.gameState.currentQuestionEndTime = new Date(questionStartTime.getTime() + 30000);
+    gameState.currentQuestionStartTime = questionStartTime;
+    gameState.currentQuestionEndTime = new Date(questionStartTime.getTime() + 30000);
 
     // Start 30-second timer
-    this.gameState.timers.questionTimer = setTimeout(async () => {
+    gameState.timers.questionTimer = setTimeout(async () => {
       try {
         await this.handleQuestionTimeout(question);
       } catch (error) {
@@ -612,9 +620,12 @@ export class GameManager {
       }
 
       // Move to next question after a short delay
-      setTimeout(async () => {
-        await this.moveToNextQuestion();
-      }, 2000);
+      // Check gameState is still valid after await (game might have ended)
+      if (this.gameState) {
+        this.gameState.timers.nextQuestionTimer = setTimeout(async () => {
+          await this.moveToNextQuestion();
+        }, 2000);
+      }
     }
   }
 
@@ -655,7 +666,7 @@ export class GameManager {
    * Move to next question
    */
   private async moveToNextQuestion(): Promise<void> {
-    if (!this.gameState) {
+    if (!this.gameState || !this.gameState.thread) {
       return;
     }
 
@@ -1268,6 +1279,9 @@ export class GameManager {
     }
     if (this.gameState.timers.threadDeletionTimer) {
       clearTimeout(this.gameState.timers.threadDeletionTimer);
+    }
+    if (this.gameState.timers.nextQuestionTimer) {
+      clearTimeout(this.gameState.timers.nextQuestionTimer);
     }
 
     this.gameState.timers = {};
