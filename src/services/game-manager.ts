@@ -14,6 +14,7 @@ import {
   createFinalJeopardyQuestionEmbed,
   createFinalJeopardyResultsEmbed,
   createFinalLeaderboardEmbed,
+  createHistoricalLeaderboardEmbed,
   createInfoEmbed,
   formatCurrency
 } from '../utils/formatters';
@@ -846,6 +847,27 @@ export class GameManager {
         embeds: [leaderboardEmbed],
         flags: MessageFlags.SuppressNotifications
       });
+
+      // Post monthly leaderboard snapshot (suppress notifications)
+      try {
+        const monthlyLeaderboard = await this.databaseService.getLeaderboard('month', 10);
+        if (monthlyLeaderboard.length > 0) {
+          const monthlyEmbed = createHistoricalLeaderboardEmbed(monthlyLeaderboard, 'month');
+          await this.gameState.channel.send({
+            embeds: [monthlyEmbed],
+            flags: MessageFlags.SuppressNotifications
+          });
+        }
+
+        // Post message about /leaderboard command
+        await this.gameState.channel.send({
+          content: '💡 Use `/leaderboard` to view all-time, monthly, or yearly leaderboards!',
+          flags: MessageFlags.SuppressNotifications
+        });
+      } catch (error) {
+        logger.error('Error posting monthly leaderboard snapshot:', error);
+        // Don't throw - continue with archiving even if monthly leaderboard fails
+      }
     }
 
     // Archive game
@@ -986,6 +1008,27 @@ export class GameManager {
         embeds: [channelEmbed],
         flags: MessageFlags.SuppressNotifications
       });
+
+      // Post monthly leaderboard snapshot (suppress notifications)
+      try {
+        const monthlyLeaderboard = await this.databaseService.getLeaderboard('month', 10);
+        if (monthlyLeaderboard.length > 0) {
+          const monthlyEmbed = createHistoricalLeaderboardEmbed(monthlyLeaderboard, 'month');
+          await this.gameState.channel.send({
+            embeds: [monthlyEmbed],
+            flags: MessageFlags.SuppressNotifications
+          });
+        }
+
+        // Post message about /leaderboard command
+        await this.gameState.channel.send({
+          content: '💡 Use `/leaderboard` to view all-time, monthly, or yearly leaderboards!',
+          flags: MessageFlags.SuppressNotifications
+        });
+      } catch (error) {
+        logger.error('Error posting monthly leaderboard snapshot:', error);
+        // Don't throw - continue with archiving even if monthly leaderboard fails
+      }
     }
 
     // Archive with 'abandoned' status

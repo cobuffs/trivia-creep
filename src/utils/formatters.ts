@@ -58,7 +58,7 @@ export function createRulesEmbed(threadLink?: string, scheduledStartTime?: Date)
     description += `**Game will start at:** ${formattedTime}\n\n`;
     description += 'A reminder will be sent 15 minutes before the game begins!';
   } else {
-    description += 'We\'ll begin in 60 seconds!';
+    description += 'We\'ll begin in about 60 seconds!';
   }
 
   return new EmbedBuilder()

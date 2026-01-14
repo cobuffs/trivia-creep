@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction } from 'discord.js';
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { GameManager } from '../services/game-manager';
 import { createErrorEmbed, createSuccessEmbed, formatCurrency } from '../utils/formatters';
 import { logger } from '../utils/logger';
@@ -7,7 +7,7 @@ export async function handleFinalWagerCommand(
   interaction: ChatInputCommandInteraction,
   gameManager: GameManager
 ) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const amount = interaction.options.getInteger('amount', true);

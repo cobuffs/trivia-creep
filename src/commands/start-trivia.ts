@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, TextChannel, MessageFlags, GuildMember, PermissionFlagsBits, ThreadChannel, ModalSubmitInteraction, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle, ComponentType, ButtonInteraction } from 'discord.js';
+import { ChatInputCommandInteraction, TextChannel, MessageFlags, GuildMember, PermissionFlagsBits, ThreadChannel, ModalSubmitInteraction, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle, ComponentType, ButtonInteraction, Message, REST, Routes } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
 import { SchedulerService } from '../services/scheduler';
@@ -7,6 +7,22 @@ import { logger } from '../utils/logger';
 import { formatDateTime } from '../utils/datetime-parser';
 import { LMStudioService } from '../services/lmstudio';
 import { Question } from '../../helper-scripts/types';
+
+// Store original button interaction info to update messages after modal submission
+// Key: userId, Value: { messageId, webhookUrl, webhookToken }
+interface ButtonInteractionInfo {
+  messageId: string;
+  webhookUrl: string;
+  webhookToken: string;
+}
+const pendingButtonInteractions = new Map<string, ButtonInteractionInfo>();
+
+/**
+ * Store the original button interaction info so we can update the message after modal submission
+ */
+export function storeButtonInteraction(userId: string, messageId: string, webhookUrl: string, webhookToken: string): void {
+  pendingButtonInteractions.set(userId, { messageId, webhookUrl, webhookToken });
+}
 
 
 /**
@@ -32,7 +48,7 @@ export async function handleScheduleTriviaModal(
           'Example: `2024-01-15` (January 15, 2024)\n' +
           'Please enter the date in the format shown above.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -49,7 +65,7 @@ export async function handleScheduleTriviaModal(
           '**Month must be between 1 and 12**\n\n' +
           'Example: `2024-01-15` (January = 01)'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -61,7 +77,7 @@ export async function handleScheduleTriviaModal(
           '**Day must be between 1 and 31**\n\n' +
           'Please check the day value in your date.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -79,7 +95,7 @@ export async function handleScheduleTriviaModal(
           '• `09:00` = 9:00 AM\n\n' +
           'Please use 24-hour format (00:00 to 23:59).'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -98,7 +114,7 @@ export async function handleScheduleTriviaModal(
           '• `20:00` = 8:00 PM\n' +
           '• `23:59` = 11:59 PM'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -110,7 +126,7 @@ export async function handleScheduleTriviaModal(
           '**Minutes must be between 0 and 59**\n\n' +
           'Please check the minutes value in your time.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -131,7 +147,7 @@ export async function handleScheduleTriviaModal(
           '• April 31\n' +
           '• Invalid leap year dates'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -148,7 +164,7 @@ export async function handleScheduleTriviaModal(
           `You entered: ${formatDateTime(scheduledDate)}\n\n` +
           'Please choose a date and time that is later than now.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -164,7 +180,7 @@ export async function handleScheduleTriviaModal(
           `You can schedule games up to ${formatDateTime(maxTime)}.\n` +
           `You entered: ${formatDateTime(scheduledDate)}`
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -177,7 +193,7 @@ export async function handleScheduleTriviaModal(
         'Game Scheduled',
         `Trivia game scheduled for ${formattedTime}!\n\nProcessing questions and creating thread...`
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
 
     // Process the scheduled game in the background (don't await - let it run async)
@@ -190,7 +206,7 @@ export async function handleScheduleTriviaModal(
             'Error Scheduling Game',
             'An error occurred while processing your scheduled game. Please try again or contact an administrator.'
           )],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         }).catch(err => {
           logger.error('Failed to send error follow-up:', err);
         });
@@ -200,7 +216,7 @@ export async function handleScheduleTriviaModal(
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
         embeds: [createErrorEmbed('Error', 'An error occurred while processing your scheduled game.')],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   }
@@ -223,12 +239,12 @@ async function processScheduledGame(
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
         embeds: [createErrorEmbed(title, message)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     } else {
       await interaction.reply({
         embeds: [createErrorEmbed(title, message)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   };
@@ -409,7 +425,7 @@ async function processScheduledGame(
         'Game Scheduled',
         `Trivia game scheduled for ${formattedTime}!\n\nThread created and questions prepared. A reminder will be sent 15 minutes before the game starts.`
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   } else {
     // For modal submissions, update the initial reply with final success message
@@ -431,8 +447,52 @@ async function processScheduledGame(
           'Game Scheduled',
           `Trivia game scheduled for ${formattedTime}!\n\nThread created and questions prepared. A reminder will be sent 15 minutes before the game starts.`
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
+    }
+
+    // Update the original button message to show "Game Scheduled!" and remove buttons
+    const buttonInfo = pendingButtonInteractions.get(interaction.user.id);
+    if (buttonInfo) {
+      try {
+        // Parse the webhook URL to get application ID and token
+        // Format: https://discord.com/api/webhooks/{application_id}/{interaction_token}
+        const urlMatch = buttonInfo.webhookUrl.match(/webhooks\/(\d+)\/([^/]+)/);
+        if (!urlMatch) {
+          logger.warn('Failed to parse webhook URL:', buttonInfo.webhookUrl);
+          pendingButtonInteractions.delete(interaction.user.id);
+          return;
+        }
+        
+        const applicationId = urlMatch[1];
+        const interactionToken = urlMatch[2];
+        
+        // Use the webhook to edit the original ephemeral message
+        const rest = new REST().setToken(interaction.client.token!);
+        
+        // Update the original button message to show "Game Scheduled!" and remove buttons
+        await rest.patch(
+          Routes.webhookMessage(applicationId, interactionToken, buttonInfo.messageId),
+          {
+            body: {
+              content: 'Game Scheduled!',
+              embeds: [],
+              components: []
+            }
+          }
+        );
+        
+        // Clean up the stored reference
+        pendingButtonInteractions.delete(interaction.user.id);
+      } catch (error) {
+        logger.warn('Failed to update original button message via webhook:', error);
+        // Log the full error for debugging
+        if (error instanceof Error) {
+          logger.warn('Error details:', error.message, error.stack);
+        }
+        // Clean up even if update fails
+        pendingButtonInteractions.delete(interaction.user.id);
+      }
     }
   }
 
@@ -456,7 +516,7 @@ export async function handleStartNowButton(
           'Trivia Channel Not Configured',
           'Trivia channel not configured. Use `/config` to set it up.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -493,7 +553,7 @@ export async function handleStartNowButton(
             'Permission Denied',
             `You need the ${roleName} role to start trivia games.`
           )],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -508,7 +568,7 @@ export async function handleStartNowButton(
             'Game Already in Progress',
             'A trivia game is already in progress. Please wait for it to finish.'
           )],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -522,7 +582,7 @@ export async function handleStartNowButton(
           'Channel Not Found',
           'The configured trivia channel could not be found.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -541,7 +601,7 @@ export async function handleStartNowButton(
           'Insufficient Permissions',
           'Bot lacks required permissions. Please ensure the bot has: Send Messages, Embed Links, Create Public Threads, Send Messages in Threads, and Manage Threads and Posts.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -559,7 +619,7 @@ export async function handleStartNowButton(
         // If update fails, try to reply instead
         await interaction.reply({
           content: 'Game Starting!',
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
     } else {
@@ -568,7 +628,7 @@ export async function handleStartNowButton(
           'Starting Game',
           '**Starting game now...**\n\nRules will be posted in the trivia channel.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -590,12 +650,12 @@ export async function handleStartNowButton(
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
         embeds: [createErrorEmbed('Failed to Start Game', errorMessage)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     } else if (interaction.isButton()) {
       await interaction.followUp({
         embeds: [createErrorEmbed('Failed to Start Game', errorMessage)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   }
@@ -671,7 +731,7 @@ export async function handleStartTriviaCommand(
           'Trivia Channel Not Configured',
           'Trivia channel not configured. Use `/config` to set it up.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -708,7 +768,7 @@ export async function handleStartTriviaCommand(
             'Permission Denied',
             `You need the ${roleName} role to start trivia games.`
           )],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -723,7 +783,7 @@ export async function handleStartTriviaCommand(
             'Game Already in Progress',
             'A trivia game is already in progress. Please wait for it to finish.'
           )],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -737,7 +797,7 @@ export async function handleStartTriviaCommand(
           'Channel Not Found',
           'The configured trivia channel could not be found.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -756,7 +816,7 @@ export async function handleStartTriviaCommand(
           'Insufficient Permissions',
           'Bot lacks required permissions. Please ensure the bot has: Send Messages, Embed Links, Create Public Threads, Send Messages in Threads, and Manage Threads and Posts.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -784,8 +844,13 @@ export async function handleStartTriviaCommand(
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(startNowButton, scheduleButton)
       ],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
+    
+    // Store the webhook info so we can update this message later when "Schedule for Later" is clicked
+    // For ephemeral messages, we use "@original" as the message ID which refers to the original interaction response
+    const webhookUrl = `https://discord.com/api/webhooks/${interaction.applicationId}/${interaction.token}`;
+    storeButtonInteraction(interaction.user.id, '@original', webhookUrl, interaction.token);
   } catch (error: any) {
     logger.error('Error starting trivia game:', error);
     
@@ -800,7 +865,7 @@ export async function handleStartTriviaCommand(
     if (!interaction.replied) {
       await interaction.reply({
         embeds: [createErrorEmbed('Failed to Start Game', errorMessage)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   }

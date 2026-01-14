@@ -1,11 +1,11 @@
-import { Interaction } from 'discord.js';
+import { Interaction, MessageFlags } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { GameManager } from '../services/game-manager';
 import { SchedulerService } from '../services/scheduler';
 import { logger } from '../utils/logger';
 import { createInfoEmbed } from '../utils/formatters';
 import { handleConfigCommand } from '../commands/config';
-import { handleStartTriviaCommand, handleScheduleTriviaModal, createScheduleTriviaModal, handleStartNowButton } from '../commands/start-trivia';
+import { handleStartTriviaCommand, handleScheduleTriviaModal, createScheduleTriviaModal, handleStartNowButton, storeButtonInteraction } from '../commands/start-trivia';
 import { handleEndTriviaCommand } from '../commands/end-trivia';
 import { handleLeaderboardCommand } from '../commands/leaderboard';
 import { handleMyTriviaHistoryCommand } from '../commands/my-trivia-history';
@@ -27,8 +27,8 @@ export async function handleInteraction(
   // Handle button interactions
   if (interaction.isButton()) {
     if (interaction.customId === 'schedule-trivia-button') {
-      // For ephemeral messages, we can't edit them after showing modal
-      // So we just show the modal - the buttons will remain but that's a Discord limitation
+      // The webhook info should already be stored when the command was executed
+      // Just show the modal
       const modal = createScheduleTriviaModal();
       await interaction.showModal(modal);
       return;
@@ -80,7 +80,7 @@ export async function handleInteraction(
         break;
       default:
         logger.warn(`Unknown command: ${commandName}`);
-        await interaction.reply({ content: 'Unknown command.', ephemeral: true });
+        await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
     }
   } catch (error) {
     logger.error(`Error handling command ${commandName}:`, error);
@@ -88,12 +88,12 @@ export async function handleInteraction(
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({ 
         content: 'An error occurred while processing your command.', 
-        ephemeral: true 
+        flags: MessageFlags.Ephemeral 
       });
     } else {
       await interaction.reply({ 
         content: 'An error occurred while processing your command.', 
-        ephemeral: true 
+        flags: MessageFlags.Ephemeral 
       });
     }
   }

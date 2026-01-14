@@ -14,7 +14,7 @@ export async function handleEndTriviaCommand(
         'Permission Denied',
         'You don\'t have permission to end trivia games.'
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -27,7 +27,7 @@ export async function handleEndTriviaCommand(
         'No Active Game',
         'No active trivia game to end.'
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -41,7 +41,7 @@ export async function handleEndTriviaCommand(
         'Game Ended',
         `🛑 Trivia game ended early by @${interaction.user.username}\n\nFinal leaderboard posted in channel.\n\nGame has been archived.`
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
 
     logger.info(`Game ended early by ${interaction.user.tag} in guild ${interaction.guildId}`);
@@ -52,7 +52,7 @@ export async function handleEndTriviaCommand(
         'Failed to End Game',
         'An error occurred while ending the game.'
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 }

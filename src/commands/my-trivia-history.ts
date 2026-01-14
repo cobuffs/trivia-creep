@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction } from 'discord.js';
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { DatabaseService } from '../services/database';
 import { createPlayerHistoryEmbed, createInfoEmbed, createErrorEmbed } from '../utils/formatters';
 import { logger } from '../utils/logger';
@@ -7,7 +7,7 @@ export async function handleMyTriviaHistoryCommand(
   interaction: ChatInputCommandInteraction,
   databaseService: DatabaseService
 ) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const userId = interaction.user.id;

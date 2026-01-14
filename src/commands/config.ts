@@ -14,7 +14,7 @@ export async function handleConfigCommand(
         'Permission Denied',
         'You don\'t have permission to configure the trivia channel.'
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -28,7 +28,7 @@ export async function handleConfigCommand(
         'Invalid Channel',
         'Invalid channel specified. Please select a text channel.'
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -44,7 +44,7 @@ export async function handleConfigCommand(
             'Invalid Role',
             'The specified role could not be found.'
           )],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -55,7 +55,7 @@ export async function handleConfigCommand(
           'Invalid Role',
           'Unable to verify the specified role. The bot may need "View Roles" permission to use role-based access control.'
         )],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -77,7 +77,7 @@ export async function handleConfigCommand(
         'Trivia Channel Configured',
         `Trivia channel configured: ${channel}${roleMessage}\nAll trivia games will be played in this channel.`
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
 
     logger.info(`Guild ${interaction.guildId} configured trivia channel: ${channel.id}`);
@@ -103,7 +103,7 @@ export async function handleConfigCommand(
         'Configuration Failed',
         'Failed to save configuration. Please try again.'
       )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 }
