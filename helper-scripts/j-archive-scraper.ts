@@ -1,3 +1,21 @@
+/**
+ * J-Archive Scraper
+ * 
+ * Main export: scrapeSeason(season) - Import all games from a season (idempotent)
+ * 
+ * This scraper imports Jeopardy! questions from j-archive.com.
+ * The scrapeSeason() function is idempotent and will skip games that already exist
+ * in the database, making it safe to run periodically to keep your database up to date.
+ * 
+ * CLI Usage:
+ *   npm run scrape -- --season 40    # Import season 40 (recommended for periodic updates)
+ *   npm run scrape -- --game-id 1234 # Import a single game
+ * 
+ * Programmatic Usage:
+ *   import { scrapeSeason } from './j-archive-scraper';
+ *   const result = await scrapeSeason('40');
+ */
+
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { JArchiveQuestion, GameInfo } from './types';
@@ -309,26 +327,175 @@ export async function scrapeGameWithCheck(gameId: number, season?: string): Prom
 }
 
 /**
+ * Scrape all games for a single season (idempotent - skips games already in database)
+ * This is the recommended way to import a season's worth of shows.
+ * 
+ * @param season - Season identifier (e.g., "1", "jm", "40")
+ * @param options - Optional configuration
+ * @returns Summary statistics about the scraping operation
+ * 
+ * @example
+ * // Import season 40
+ * const result = await scrapeSeason('40');
+ * console.log(`Imported ${result.questionsInserted} questions from ${result.gamesProcessed} games`);
+ */
+export async function scrapeSeason(
+  season: string,
+  options: {
+    autoConnect?: boolean;  // Automatically connect/disconnect from database (default: true)
+    logProgress?: boolean;   // Log progress every N games (default: true)
+  } = {}
+): Promise<{
+  season: string;
+  gamesFound: number;
+  gamesProcessed: number;
+  gamesSkipped: number;
+  questionsInserted: number;
+  errors: Array<{ gameId: number; error: string }>;
+}> {
+  const { autoConnect = true, logProgress = true } = options;
+  
+  // Ensure database connection
+  if (autoConnect) {
+    await connect();
+    await createTableIfNotExists();
+  }
+
+  const result = {
+    season,
+    gamesFound: 0,
+    gamesProcessed: 0,
+    gamesSkipped: 0,
+    questionsInserted: 0,
+    errors: [] as Array<{ gameId: number; error: string }>
+  };
+
+  try {
+    console.log(`\n=== Scraping season ${season} ===`);
+    const games = await getGamesForSeason(season);
+    result.gamesFound = games.length;
+    
+    console.log(`Found ${games.length} games in season ${season}`);
+    
+    for (const game of games) {
+      try {
+        const questions = await scrapeGameWithCheck(game.game_id, game.season);
+        if (questions.length > 0) {
+          await insertQuestions(questions);
+          result.questionsInserted += questions.length;
+          result.gamesProcessed++;
+        } else {
+          result.gamesSkipped++;
+        }
+        
+        // Log progress every 10 games
+        if (logProgress && (result.gamesProcessed + result.gamesSkipped) % 10 === 0) {
+          console.log(`Progress: ${result.gamesProcessed + result.gamesSkipped}/${games.length} games (${result.gamesProcessed} new, ${result.gamesSkipped} skipped)`);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`Error processing game ${game.game_id}:`, errorMsg);
+        result.errors.push({ gameId: game.game_id, error: errorMsg });
+        // Continue with next game
+      }
+    }
+
+    console.log(`\n=== Season ${season} Complete ===`);
+    console.log(`Games found: ${result.gamesFound}`);
+    console.log(`Games processed: ${result.gamesProcessed}`);
+    console.log(`Games skipped (already in DB): ${result.gamesSkipped}`);
+    console.log(`Total questions inserted: ${result.questionsInserted}`);
+    if (result.errors.length > 0) {
+      console.log(`Errors encountered: ${result.errors.length}`);
+    }
+
+  } catch (error) {
+    console.error(`Fatal error scraping season ${season}:`, error);
+    throw error;
+  } finally {
+    if (autoConnect) {
+      await close();
+    }
+  }
+
+  return result;
+}
+
+/**
  * Main entry point - parse CLI args and orchestrate scraping
+ * 
+ * Usage:
+ *   npm run scrape:jarchive:season 40     # Import all games from season 40 (idempotent)
+ *   npm run scrape:jarchive:game 1234     # Import a single game
+ *   npm run scrape:jarchive               # Import all seasons (use with caution!)
  */
 async function main() {
-  // Parse CLI arguments
+  // Parse CLI arguments - check for mode flags first, then positional args
   const args = process.argv.slice(2);
   let targetSeason: string | null = null;
   let targetGameId: number | null = null;
+  let mode: 'season' | 'game' | 'all' | null = null;
 
+  // Check for mode flags (set by package.json scripts)
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--season' && i + 1 < args.length) {
+    if (args[i] === '--season-mode') {
+      mode = 'season';
+      // Next arg is the season value
+      if (i + 1 < args.length) {
+        targetSeason = args[i + 1];
+        i++;
+      }
+    } else if (args[i] === '--game-mode') {
+      mode = 'game';
+      // Next arg is the game ID
+      if (i + 1 < args.length) {
+        targetGameId = parseInt(args[i + 1], 10);
+        if (isNaN(targetGameId)) {
+          console.error('Invalid game-id. Must be a number.');
+          process.exit(1);
+        }
+        i++;
+      }
+    } else if (args[i] === '--season' && i + 1 < args.length) {
+      // Backward compatibility
       targetSeason = args[i + 1];
+      mode = 'season';
       i++;
     } else if (args[i] === '--game-id' && i + 1 < args.length) {
+      // Backward compatibility
       targetGameId = parseInt(args[i + 1], 10);
       if (isNaN(targetGameId)) {
         console.error('Invalid game-id. Must be a number.');
         process.exit(1);
       }
+      mode = 'game';
       i++;
+    } else if (args[i] === '--help' || args[i] === '-h') {
+      console.log(`
+Usage: j-archive-scraper [mode] [value]
+
+Modes:
+  --season-mode <season>  Import all games from a specific season (idempotent - skips existing games)
+  --game-mode <id>        Import a single game by ID
+  (no args)                Import all seasons (use with caution!)
+
+Examples:
+  # Import season 40 (recommended for periodic updates)
+  npm run scrape:jarchive:season 40
+  
+  # Import a single game
+  npm run scrape:jarchive:game 1234
+  
+  # Import all seasons (use with caution - this will take a very long time!)
+  npm run scrape:jarchive
+`);
+      process.exit(0);
     }
+  }
+
+  // If no mode determined, default to 'all'
+  if (!mode) {
+    mode = 'all';
   }
 
   try {
@@ -340,7 +507,7 @@ async function main() {
     let gamesProcessed = 0;
     let gamesSkipped = 0;
 
-    if (targetGameId !== null) {
+    if (mode === 'game' && targetGameId !== null) {
       // Scrape single game
       console.log(`Scraping game ${targetGameId}...`);
       const questions = await scrapeGameWithCheck(targetGameId);
@@ -351,32 +518,13 @@ async function main() {
       } else {
         gamesSkipped++;
       }
-    } else if (targetSeason !== null) {
-      // Scrape all games in a season
-      console.log(`Scraping season ${targetSeason}...`);
-      const games = await getGamesForSeason(targetSeason);
-      
-      for (const game of games) {
-        try {
-          const questions = await scrapeGameWithCheck(game.game_id, game.season);
-          if (questions.length > 0) {
-            await insertQuestions(questions);
-            totalQuestions += questions.length;
-            gamesProcessed++;
-          } else {
-            gamesSkipped++;
-          }
-          
-          // Log progress every 10 games
-          if ((gamesProcessed + gamesSkipped) % 10 === 0) {
-            console.log(`Progress: ${gamesProcessed + gamesSkipped}/${games.length} games processed`);
-          }
-        } catch (error) {
-          console.error(`Error processing game ${game.game_id}:`, error);
-          // Continue with next game
-        }
-      }
-    } else {
+    } else if (mode === 'season' && targetSeason !== null) {
+      // Scrape all games in a season using the dedicated function
+      const result = await scrapeSeason(targetSeason, { autoConnect: false });
+      totalQuestions = result.questionsInserted;
+      gamesProcessed = result.gamesProcessed;
+      gamesSkipped = result.gamesSkipped;
+    } else if (mode === 'all') {
       // Scrape all seasons and games
       console.log('Scraping all seasons and games...');
       const seasons = await getAllSeasons();

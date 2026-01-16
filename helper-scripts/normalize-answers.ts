@@ -308,6 +308,67 @@ function addNicknameExpansions(spec: SingleSpec): SingleSpec {
   return spec;
 }
 
+/**
+ * Validate and fix invalid n_of_m structures
+ * If required_count > options.length, convert to single mode
+ */
+function validateAndFixSpec(spec: Spec, dbAnswer: string): Spec {
+  // Only check n_of_m specs
+  if (spec.answer_mode !== "n_of_m") {
+    return spec;
+  }
+
+  const nOfMSpec = spec as NOfMSpec;
+  
+  // Check if invalid: required_count is greater than available options
+  if (nOfMSpec.required_count > nOfMSpec.options.length) {
+    // Convert to single mode
+    const accepted: string[] = [];
+    
+    // Add all options to accepted
+    accepted.push(...nOfMSpec.options);
+    
+    // Add all option aliases to accepted
+    // First, add aliases for options that exist in the options array
+    for (const opt of nOfMSpec.options) {
+      if (nOfMSpec.option_aliases[opt]) {
+        accepted.push(...nOfMSpec.option_aliases[opt]);
+      }
+    }
+    
+    // Also check for any option_aliases keys that might not match exactly
+    // (shouldn't happen after normalization, but be safe)
+    for (const optKey in nOfMSpec.option_aliases) {
+      if (!nOfMSpec.options.includes(optKey)) {
+        // This key doesn't match an option, but include its aliases anyway
+        accepted.push(...nOfMSpec.option_aliases[optKey]);
+      }
+    }
+    
+    // Ensure the canonical answer is included
+    const canon = normalizeText(dbAnswer);
+    if (canon && !accepted.includes(canon)) {
+      accepted.unshift(canon);
+    }
+    
+    const single: SingleSpec = {
+      answer_mode: "single",
+      accepted: Array.from(new Set(accepted)),
+      required_count: 0,
+      allow_more_than_required: false,
+      options: [],
+      option_aliases: {},
+      entity_type: nOfMSpec.entity_type,
+    };
+    
+    // Apply person-specific enhancements
+    const enhanced = addLastNameAcceptance(addNicknameExpansions(single));
+    return enhanced;
+  }
+  
+  return spec;
+}
+
 function normalizeSpec(raw: any, dbAnswer: string): Spec {
   const mode = raw?.answer_mode;
   const entity_type = toEntityType(raw?.entity_type);
@@ -644,9 +705,11 @@ async function main() {
         try {
           const raw = await callLMStudio(r);
           const spec = normalizeSpec(raw, r.answer);
+          // Validate and fix invalid n_of_m structures
+          const validatedSpec = validateAndFixSpec(spec, r.answer);
           
           // Add to write buffer instead of writing immediately
-          writeBuffer.push({ questionId: r.id, spec });
+          writeBuffer.push({ questionId: r.id, spec: validatedSpec });
           
           // Flush buffer if it's getting large
           if (writeBuffer.length >= CONFIG.DB_WRITE_BATCH_SIZE) {

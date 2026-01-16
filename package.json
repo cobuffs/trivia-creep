@@ -9,8 +9,8 @@
     "dev": "ts-node src/bot/index.ts",
     "setup:database": "ts-node helper-scripts/create-bot-tables.ts",
     "scrape:jarchive": "ts-node helper-scripts/j-archive-scraper.ts",
-    "scrape:jarchive:season": "ts-node helper-scripts/j-archive-scraper.ts --season",
-    "scrape:jarchive:game": "ts-node helper-scripts/j-archive-scraper.ts --game-id",
+    "scrape:jarchive:season": "ts-node helper-scripts/j-archive-scraper.ts --season-mode",
+    "scrape:jarchive:game": "ts-node helper-scripts/j-archive-scraper.ts --game-mode",
     "normalize:answers": "ts-node helper-scripts/normalize-answers.ts",
     "curl:question": "ts-node helper-scripts/generate-curl.ts",
     "test:answer": "ts-node helper-scripts/test-answer-validation.ts"
