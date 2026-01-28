@@ -1144,8 +1144,8 @@ export class GameManager {
       throw new Error('You have already placed your wager');
     }
 
-    // Validate wager
-    const maxWager = player.score > 0 ? player.score : 2000;
+    // Validate wager - players can wager up to their current score, or $2000 if they have less than $2000
+    const maxWager = player.score >= 2000 ? player.score : 2000;
     if (wager < 1 || wager > maxWager || !Number.isInteger(wager)) {
       throw new Error(`Invalid wager amount. You can wager between $1 and ${formatCurrency(maxWager)}`);
     }

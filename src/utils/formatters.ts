@@ -207,7 +207,7 @@ export function createFinalJeopardyCategoryEmbed(
   return new EmbedBuilder()
     .setTitle('🎯 FINAL JEOPARDY')
     .addFields(fields)
-    .setDescription('💰 You have 30 seconds to place your wager using `/final-wager`')
+    .setDescription('💰 You have 30 seconds to place your wager using `/final-wager`\n\n**Note:** You can wager up to your current score, or up to $2,000 if you have less than $2,000 in earnings.')
     .setColor(0xFFD700)
     .setTimestamp();
 }
