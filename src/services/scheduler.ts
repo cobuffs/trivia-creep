@@ -5,6 +5,7 @@ import { Question } from '../../helper-scripts/types';
 import { logger } from '../utils/logger';
 import { createInfoEmbed, createRulesEmbed } from '../utils/formatters';
 import { formatDateTime } from '../utils/datetime-parser';
+import { LMStudioService } from './lmstudio';
 
 interface ScheduledGameTimer {
   scheduledGame: ScheduledGame;
@@ -329,13 +330,120 @@ export class SchedulerService {
     const triviaNerdsRole = textChannel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
     const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
     
+    // Get the user who created the game
+    let userName: string | null = null;
+    if (scheduledGame.createdByUserId) {
+      try {
+        const user = await this.client.users.fetch(scheduledGame.createdByUserId);
+        userName = user.displayName || user.username;
+      } catch (error) {
+        logger.warn(`Could not fetch user ${scheduledGame.createdByUserId} for scheduled game welcome message:`, error);
+      }
+    }
+    
+    const userText = userName ? ` by ${userName}` : '';
+    
     // Post welcome message to main channel (with "We'll begin in 60 seconds!")
     await textChannel.send({ 
-      content: roleMention ? `${roleMention} Scheduled trivia is starting soon!` : undefined,
+      content: roleMention ? `${roleMention} Scheduled trivia is starting${userText} soon!` : userName ? `Scheduled trivia is starting${userText} soon!` : undefined,
       embeds: [createRulesEmbed(threadLink)]
     });
 
     logger.info(`Sent welcome message for scheduled game ${scheduledGame.scheduledGameId}`);
+
+    // Check if questions need normalization and attempt it in the background
+    await this.attemptNormalizationIfNeeded(scheduledGame);
+  }
+
+  /**
+   * Check if scheduled game has questions that need normalization and attempt to normalize them
+   */
+  private async attemptNormalizationIfNeeded(scheduledGame: ScheduledGame): Promise<void> {
+    try {
+      // Collect all question IDs
+      const allQuestionIds = [
+        ...scheduledGame.round1Questions,
+        ...scheduledGame.round2Questions,
+        ...(scheduledGame.finalQuestionId ? [scheduledGame.finalQuestionId] : [])
+      ];
+
+      // Check which questions are missing normalization
+      const normalizedAnswers = scheduledGame.normalizedAnswers || new Map();
+      const questionsNeedingNormalization = allQuestionIds.filter(id => !normalizedAnswers.has(id));
+
+      if (questionsNeedingNormalization.length === 0) {
+        logger.debug(`All questions already normalized for scheduled game ${scheduledGame.scheduledGameId}`);
+        return;
+      }
+
+      logger.info(`Checking LM Studio for normalization retry on ${questionsNeedingNormalization.length} questions for scheduled game ${scheduledGame.scheduledGameId}`);
+
+      // Check if LM Studio is running
+      const lmStudioService = new LMStudioService();
+      const lmStudioRunning = await lmStudioService.isServerRunning();
+
+      if (!lmStudioRunning) {
+        logger.info(`LM Studio not running - scheduled game ${scheduledGame.scheduledGameId} will proceed with exact answers only`);
+        return;
+      }
+
+      // Fetch question objects for normalization
+      const questionsToNormalize: Question[] = [];
+      for (const questionId of questionsNeedingNormalization) {
+        const question = await this.databaseService.getQuestionById(questionId);
+        if (question) {
+          questionsToNormalize.push(question);
+        }
+      }
+
+      if (questionsToNormalize.length === 0) {
+        logger.warn(`Could not fetch questions for normalization for scheduled game ${scheduledGame.scheduledGameId}`);
+        return;
+      }
+
+      logger.info(`Attempting to normalize ${questionsToNormalize.length} answers in background for scheduled game ${scheduledGame.scheduledGameId}...`);
+
+      // Normalize in background - don't block
+      (async () => {
+        const updatedNormalizedAnswers = new Map(normalizedAnswers);
+        
+        for (const question of questionsToNormalize) {
+          if (question.id) {
+            try {
+              const spec = await lmStudioService.normalizeAnswer(
+                question.question,
+                question.answer,
+                question.category ?? null
+              );
+              updatedNormalizedAnswers.set(question.id, spec);
+              await this.databaseService.storeAnswerSpec(question.id, spec);
+              logger.debug(`Normalized answer for question_id=${question.id} in 60-second reminder retry`);
+            } catch (error) {
+              logger.error(`Failed to normalize answer for question_id=${question.id} in 60-second reminder retry:`, error);
+              // Continue with next question even if one fails
+            }
+          }
+        }
+
+        // Update the scheduled game with normalized answers
+        try {
+          await this.databaseService.updateScheduledGameNormalizedAnswers(
+            scheduledGame.scheduledGameId,
+            updatedNormalizedAnswers
+          );
+          logger.info(`Updated scheduled game ${scheduledGame.scheduledGameId} with normalized answers from 60-second reminder retry`);
+        } catch (error) {
+          logger.error('Error updating scheduled game with normalized answers from 60-second reminder retry:', error);
+        }
+
+        logger.info(`Background normalization retry complete for scheduled game ${scheduledGame.scheduledGameId}. ${updatedNormalizedAnswers.size} answers ready.`);
+      })().catch(error => {
+        logger.error('Error in background normalization retry for scheduled game:', error);
+      });
+    } catch (error) {
+      logger.error(`Error checking normalization for scheduled game ${scheduledGame.scheduledGameId}:`, error);
+      // Don't throw - game will proceed with exact answers if normalization fails
+    }
   }
 
   /**

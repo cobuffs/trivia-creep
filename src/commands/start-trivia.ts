@@ -324,11 +324,14 @@ async function processScheduledGame(
   const triviaNerdsRole = textChannel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
   const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
   
+  // Get user display name
+  const userName = interaction.user.displayName || interaction.user.username;
+  
   await textChannel.send({
-    content: roleMention ? `${roleMention} A trivia game has been scheduled!` : undefined,
+    content: roleMention ? `${roleMention} A trivia game has been scheduled by ${userName}!` : `A trivia game has been scheduled by ${userName}!`,
     embeds: [createInfoEmbed(
       '📅 Trivia Game Scheduled',
-      `A trivia game has been scheduled!\n\n**Start time:** ${formattedTime}\n\n**Join the thread:** ${threadLink}`
+      `A trivia game has been scheduled by **${userName}**!\n\n**Start time:** ${formattedTime}\n\n**Join the thread:** ${threadLink}`
     )]
   });
 
@@ -633,7 +636,7 @@ export async function handleStartNowButton(
     }
 
     // Start the game (this will post rules and wait 60 seconds before first question)
-    await gameManager.startGame(interaction.guildId!, config.triviaChannelId, channel as TextChannel);
+    await gameManager.startGame(interaction.guildId!, config.triviaChannelId, channel as TextChannel, interaction.user);
 
     logger.info(`Game started by ${interaction.user.tag} in guild ${interaction.guildId}`);
   } catch (error: any) {

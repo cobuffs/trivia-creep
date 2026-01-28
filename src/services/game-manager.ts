@@ -1,4 +1,4 @@
-import { TextChannel, Message, MessageFlags, MessageCreateOptions, ThreadChannel } from 'discord.js';
+import { TextChannel, Message, MessageFlags, MessageCreateOptions, ThreadChannel, User } from 'discord.js';
 import { Question } from '../../helper-scripts/types';
 import { DatabaseService } from './database';
 import { validateAnswer } from './answer-validator';
@@ -126,7 +126,8 @@ export class GameManager {
   async startGame(
     guildId: string,
     channelId: string,
-    channel: TextChannel
+    channel: TextChannel,
+    startedByUser?: User
   ): Promise<void> {
     if (this.isGameActive()) {
       throw new Error('A trivia game is already in progress');
@@ -206,8 +207,19 @@ export class GameManager {
       const triviaNerdsRole = channel.guild.roles.cache.find(role => role.name === 'trivia-nerds');
       const roleMention = triviaNerdsRole ? `<@&${triviaNerdsRole.id}>` : '';
       
+      // Get user display name if available
+      const userName = startedByUser ? (startedByUser.displayName || startedByUser.username) : null;
+      const userText = userName ? ` by ${userName}` : '';
+      
+      let content: string | undefined;
+      if (roleMention) {
+        content = `${roleMention} Trivia has been started${userText}. Starting in 60 seconds!`;
+      } else if (userName) {
+        content = `Trivia has been started${userText}. Starting in 60 seconds!`;
+      }
+      
       await channel.send({ 
-        content: roleMention ? `${roleMention} Trivia is starting in 60 seconds!` : undefined,
+        content,
         embeds: [createRulesEmbed(threadLink)]
       });
 
